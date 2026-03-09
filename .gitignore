@@ -1,0 +1,4 @@
+*.o
+*.exe
+*.cf
+e~alu_tb.o
