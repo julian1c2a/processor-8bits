@@ -555,6 +555,55 @@ Los opcodes marcados con `---` están **reservados** para extensiones futuras.
 
 ## 10. Micro-Arquitectura — Unidades Hardware
 
+### 10.0 Arquitectura de Buses Internos — Doble Datapath
+
+El procesador dispone de **dos caminos de datos completamente independientes**.
+No comparten lógica combinacional ni registros intermedios; la UC los controla
+mediante campos de señal ortogonales dentro de cada microinstrucción.
+
+```
+  ╔══════════════════════════════════════════════════════════════╗
+  ║  ADDRESS PATH — 16 bits                                      ║
+  ║                                                              ║
+  ║   PC ───┐                                                    ║
+  ║   SP ───┼──► MUX_ABUS ──► ABUS[15:0] ──► Memoria / I/O     ║
+  ║   EAR ──┘        ▲                                           ║
+  ║                  └──── EA-adder (base[15:0] + 0x00:B)        ║
+  ║                                                              ║
+  ║   Señales UC: ABUS_SEL[1:0], EA_COMPUTE, PC_LOAD, SP_INC/DEC║
+  ╠══════════════════════════════════════════════════════════════╣
+  ║  DATA PATH — 8 bits                                          ║
+  ║                                                              ║
+  ║   A  ───┐                                                    ║
+  ║   B  ───┼──► ALU ──► resultado ──► MUX_WB ──► A / B / MDR  ║
+  ║   MDR ──┘                                                    ║
+  ║   DBUS[7:0] ◄──► MDR  (lectura/escritura de memoria)         ║
+  ║                                                              ║
+  ║   Señales UC: ALU_OP[4:0], WB_SEL[1:0], MDR_OE, MDR_WE      ║
+  ╚══════════════════════════════════════════════════════════════╝
+```
+
+**Ventajas de la separación:**
+
+| Situación | Sin separación | Con separación |
+|-----------|---------------|----------------|
+| `CALL nn`  — decrementar SP y capturar `nn` | Secuencial (2 pasos) | Paralelo en 1 microciclo |
+| `PUSH A`   — calcular dirección y leer A | Secuencial | Paralelo |
+| `LD A,[nn+B]` — EA y MDR | EA bloquea el bus | EA en address path, MDR en data path |
+| Microcode  — ancho de palabra | Un único bloque de señales ancho | Dos campos independientes más estrechos |
+
+**Regla de conflicto:** el único recurso compartido es la **SRAM/BRAM** misma
+(un único puerto de datos bidireccional). La UC garantiza que en cada ciclo
+solo uno de los dos caminos accede al puerto de memoria. El stack en BRAM
+puede tener su propio puerto dedicado (RAMB18 tiene dos puertos independientes)
+eliminando el conflicto incluso en ese caso.
+
+**Banco de registros (extensión futura):** los 8 registros R0–R7 se conectarán
+exclusivamente al DATA PATH (DBUS[7:0]); el ADDRESS PATH los usará
+indirectamente a través del EA-adder como índice (igual que B en el diseño actual).
+
+---
+
 ### 10.1 Cola de Prefetch (PFQ — 2 bytes)
 
 ```
@@ -654,52 +703,117 @@ locales, paso de parámetros) tienen latencia de **1 ciclo**.
 
 ---
 
-## 11. Ciclos de Bus — Estimación Revisada
+### 10.5 Pipeline de 2 Etapas: DECODE | EXEC+WB
 
-Bases del modelo: prefetch de 2 bytes activo, sumador EA solapado, PUSH/POP
-de 16 bits, página cero y stack en BRAM (1 ciclo), memoria general en SRAM
-external 10 ns a 50 MHz (1 ciclo de acceso).
+El DATA PATH se divide en dos etapas separadas por un **registro de pipeline**:
 
-| Instrucción        | Sin optim. | **Con optim.** | Δ  | Descripción resumida                                      |
-|--------------------|------------|----------------|----|-----------------------------------------------------------|
-| NOP / HALT         | 4          | **2**          | −2 | Opcode ya en PFQ; decode+execute en 2                     |
-| 1-byte ALU (reg)   | 4          | **2**          | −2 | PFQ tiene el opcode; ALU combinacional                    |
-| `LD A, #n`         | 6          | **2**          | −4 | Opcode + imm8 ya en PFQ; solo write A                     |
-| `LD A, B`          | 4          | **2**          | −2 | 1 byte en PFQ                                             |
-| `LD A, [n]`        | 8          | **4**          | −4 | Opcode+addr en PFQ; read pág-cero BRAM 1 ciclo + write A  |
-| `ST A, [n]`        | 8          | **4**          | −4 | Igual; write BRAM 1 ciclo                                 |
-| `LD A, [nn]`       | 10         | **6**          | −4 | PFQ da op+addr_low; addr_high 1 ciclo; mem 1 ciclo; wA    |
-| `ST A, [nn]`       | 10         | **6**          | −4 | Ídem                                                      |
-| `LD A, [nn+B]`     | 12         | **6**          | −6 | PFQ + EA solapada; mem 1 ciclo; write A                   |
-| `ST A, [nn+B]`     | 12         | **6**          | −6 | Ídem                                                      |
-| `ADD #n`           | 6          | **2**          | −4 | Opcode+imm8 en PFQ; ALU comb; write A                     |
-| `ADD [n]`          | 10         | **4**          | −6 | PFQ; BRAM pág-cero; ALU; write A                          |
-| `ADD [nn+B]`       | 14         | **8**          | −6 | PFQ + EA solapada; mem; ALU; write A                      |
-| `JP nn`            | 10         | **6**          | −4 | PFQ da op+addr_low; addr_high 1c; PC load; flush PFQ      |
-| `JR rel8`          | 6/8        | **2/4**        | −4 | PFQ; no-salto=2, salto=4 (flush+fetch)                    |
-| `JP A:B`           | 4          | **2**          | −2 | 1-byte; PC←A:B; flush                                     |
-| `CALL nn`          | 14         | **8**          | −6 | PFQ; fetch addr_high; SP−2; push PC(16b); PC←nn           |
-| `CALL ([nn])`      | 18         | **10**         | −8 | CALL + lectura indirecta de destino                        |
-| `RET`              | 10         | **6**          | −4 | PFQ; pop PC(16b) BRAM; SP+2; flush                        |
-| `RTI`              | 12         | **8**          | −4 | pop F(16b), pop PC(16b), SP+4; I←1; flush                 |
-| `PUSH A`           | 6          | **4**          | −2 | SP−2; write 16b BRAM                                      |
-| `POP A`            | 6          | **4**          | −2 | read 16b BRAM; SP+2; write A                              |
-| `PUSH A:B`         | 6          | **4**          | —  | SP−2; write 16b BRAM (A=high, B=low)                      |
-| `POP A:B`          | 6          | **4**          | —  | read 16b BRAM; SP+2; A←high, B←low                       |
-| `BEQ rel8`         | 6/8        | **2/4**        | −4 | Igual que JR (misma lógica)                               |
-| `IN A, #n`         | 6          | **4**          | −2 | PFQ; fetch puerto + ciclo I/O                             |
-| `IN A, [B]`        | 4          | **2**          | −2 | Puerto en B; sólo ciclo I/O + write A                    |
-| `OUT #n, A`        | 6          | **4**          | −2 | PFQ; fetch puerto + ciclo I/O                             |
-| `OUT [B], A`       | 4          | **2**          | −2 | Puerto en B; sólo ciclo I/O                              |
-| `ADD16 #n`         | —          | **4**          |  — | EA adder 16 b; sign-ext imm8; write A:B                   |
-| `ADD16 #nn`        | —          | **6**          |  — | EA adder 16 b; fetch imm16 solapado; write A:B            |
-| `SUB16 #n`         | —          | **4**          |  — | Ídem ADD16 #n (sumador en modo resta)                     |
-| `SUB16 #nn`        | —          | **6**          |  — | Ídem ADD16 #nn                                            |
+```
+  Ciclo N   ┌─ DECODE ─────────────────────────────────────────────────┐
+            │ • Lee PFQ[0:1]; decodifica opcode                        │
+            │ • Lee A, B (o inmediato del PFQ)                         │
+            │ • Emite señales de control para EXEC                     │
+            │ • Si dirección BRAM es conocida → la emite (ver §10.6)   │
+            └──────────────────────────── pipeline register ──────────►
+  Ciclo N+1 ┌─ EXEC + WB ───────────────────────────────────────────────┐
+            │ • ALU ejecuta con entradas del pipeline register          │
+            │ • MDR captura dato BRAM (llegó por especulación)          │
+            │ • Resultado escribe en A / B  (Write-Back)                │
+            └───────────────────────────────────────────────────────────┘
+```
 
-> Ciclos expresados en **ciclos de reloj** (1 ciclo = 1 período). Modelo de
-> referencia: **450 MHz** (MMCM/PLL Artix-7), BRAM 1 ciclo, SRAM externa
-> IS61WV102416BLL 5 ciclos (4 wait states). El bus I/O añade 1 ciclo de
-> latencia adicional sobre un acceso de registro.
+**Forwarding bypass:** el resultado de WB en el ciclo N+1 se redirige a la
+entrada de DECODE del ciclo N+2 sin pasar por el banco de registros. Evita
+el stall que ocurriría en secuencias RAW consecutivas:
+
+```asm
+  ADD #5    ; WB escribe A al final del ciclo 2
+  SUB #3    ; DECODE del ciclo 3 necesita A → bypass entrega A correcto
+```
+
+**Impacto en la palabra de microcode:** la microinstrucción tiene dos campos
+independientes, uno por etapa. La anchura total aumenta pero cada campo es
+más estrecho y simple que en un diseño de etapa única.
+
+**Restricción:** los saltos tomados causan flush del registro de pipeline y
+del PFQ (el PC pertenece al ADDRESS PATH, §10.0); el forwarding de datos no
+interactúa con los saltos.
+
+---
+
+### 10.6 Especulación de Dirección BRAM
+
+Cuando la dirección de acceso a BRAM es determinísticamente conocida antes
+de que finalice la etapa DECODE, la UC la emite al bus de direcciones en ese
+mismo ciclo. La BRAM (RAMB18/RAMB36) tiene latencia de **1 ciclo síncrono
+exacto**: el dato queda disponible al inicio de EXEC+WB.
+
+| Modo de acceso    | Dirección conocida en     | ¿Especulable? | Ganancia vs v0.4      |
+|-------------------|---------------------------|---------------|-----------------------|
+| `[n]` pág-cero    | DECODE (n en PFQ[1])      | **Sí**        | −2 ciclos             |
+| `[B]` indirecto   | DECODE (B vía forwarding) | **Sí**        | −2 ciclos             |
+| Stack `[SP±2]`    | DECODE (SP conocido)      | **Sí**        | −2 ciclos en PUSH/POP |
+| `[nn]` absoluto   | Fin DECODE (addr\_hi)     | **Parcial**   | −2 ciclos vs v0.4     |
+| `[nn+B]` indexado | Fin DECODE (EA adder)     | **Parcial**   | −2 ciclos vs v0.4     |
+| SRAM externa      | —                         | **No**        | 0 (latencia física)   |
+| Bus I/O           | —                         | **No**        | 0 (protocolo propio)  |
+
+**Mecanismo:** la UC emite `ADDR` + `EN` al RAMB18 al final de DECODE con el
+flanco de reloj. El dato llega al inicio de EXEC+WB. Si durante DECODE se
+detecta un salto tomado, la UC descarta el dato recibido sin escribirlo en
+ningún registro (especulación anulada, sin efecto visible al programador).
+
+**Interacción con forwarding:** si la dirección depende de B y B es destino
+de la instrucción previa, el bypass resuelve B antes del fin de DECODE →
+la especulación puede proceder igualmente.
+
+---
+
+## 11. Ciclos de Bus — Estimación Revisada (v0.5)
+
+Modelo: PFQ 2 bytes, EA-adder solapado, PUSH/POP 16 bits, pipeline 2 etapas
+DECODE|EXEC+WB, especulación de dirección BRAM (§10.5–10.6), SRAM 5 ciclos.
+
+| Instrucción        | Sin optim. | v0.4 | **v0.5** | Notas (v0.5)                                |
+|--------------------|------------|------|----------|---------------------------------------------|
+| NOP / HALT         | 4          | 2    | **2**    | —                                           |
+| 1-byte ALU (reg)   | 4          | 2    | **2**    | —                                           |
+| `LD A, #n`         | 6          | 2    | **2**    | —                                           |
+| `LD A, B`          | 4          | 2    | **2**    | —                                           |
+| `LD A, [n]`        | 8          | 4    | **2**    | Spec pág-cero: addr emitida en DECODE       |
+| `ST A, [n]`        | 8          | 4    | **2**    | Spec pág-cero: addr emitida en DECODE       |
+| `LD A, [nn]`       | 10         | 6    | **4**    | addr\_hi fin DECODE; BRAM en EXEC           |
+| `ST A, [nn]`       | 10         | 6    | **4**    | ídem                                        |
+| `LD A, [nn+B]`     | 12         | 6    | **4**    | EAR spec fin DECODE; BRAM en EXEC           |
+| `ST A, [nn+B]`     | 12         | 6    | **4**    | ídem                                        |
+| `ADD #n`           | 6          | 2    | **2**    | —                                           |
+| `ADD [n]`          | 10         | 4    | **2**    | Spec BRAM + forward → ALU en EXEC           |
+| `ADD [nn+B]`       | 14         | 8    | **6**    | EAR spec; BRAM; ALU; WB                     |
+| `JP nn`            | 10         | 6    | **4**    | PC load en DECODE; flush inmediato          |
+| `JR rel8`          | 6/8        | 2/4  | **2/4**  | —                                           |
+| `JP A:B`           | 4          | 2    | **2**    | —                                           |
+| `CALL nn`          | 14         | 8    | **6**    | SP−2 en DECODE; push PC en EXEC             |
+| `CALL ([nn])`      | 18         | 10   | **8**    | ídem + lectura indirecta                    |
+| `RET`              | 10         | 6    | **4**    | Spec stack: SP→BRAM en DECODE               |
+| `RTI`              | 12         | 8    | **6**    | 2× pop BRAM en cadena con spec              |
+| `PUSH A`           | 6          | 4    | **2**    | SP−2 en DECODE; write BRAM en EXEC          |
+| `POP A`            | 6          | 4    | **2**    | Spec: SP→BRAM en DECODE; WB en EXEC         |
+| `PUSH A:B`         | 6          | 4    | **2**    | ídem PUSH A                                 |
+| `POP A:B`          | 6          | 4    | **2**    | ídem POP A                                  |
+| `BEQ rel8`         | 6/8        | 2/4  | **2/4**  | —                                           |
+| `IN A, #n`         | 6          | 4    | **4**    | Bus I/O externo; sin spec                   |
+| `IN A, [B]`        | 4          | 2    | **2**    | —                                           |
+| `OUT #n, A`        | 6          | 4    | **4**    | Bus I/O externo; sin spec                   |
+| `OUT [B], A`       | 4          | 2    | **2**    | —                                           |
+| `ADD16 #n`         | —          | 4    | **4**    | —                                           |
+| `ADD16 #nn`        | —          | 6    | **4**    | EA-addr spec fin DECODE                     |
+| `SUB16 #n`         | —          | 4    | **4**    | —                                           |
+| `SUB16 #nn`        | —          | 6    | **4**    | EA-addr spec fin DECODE                     |
+
+> Ciclos expresados en **ciclos de reloj** (1 ciclo = 1 período).
+> **v0.4** = PFQ + EA-adder + stack 16 b (referencia anterior).
+> **v0.5** añade pipeline DECODE|EXEC+WB (§10.5) y especulación de dirección BRAM (§10.6).
+> La especulación **no** aplica a SRAM externa ni bus I/O.
+> Referencia: **450 MHz** (MMCM/PLL Artix-7), BRAM 1 ciclo, SRAM 5 ciclos (4 wait states).
 
 ---
 
@@ -798,7 +912,14 @@ isr:
 - [x] **Instrucciones IN/OUT**: opcodes `0xD0`–`0xD3` asignados. `IN A, #n` (2 B, 4 ciclos), `IN A, [B]` (1 B, 2 ciclos), `OUT #n, A` (2 B, 4 ciclos), `OUT [B], A` (1 B, 2 ciclos). Descritas en §7.10.
 - [x] **Unidad de Control**: primera implementación basada en **microcode** (ROM de microinstrucciones). La opción hardwired queda como optimización futura opcional.
 - [x] **Instrucciones 16 bits (ADD16/SUB16)**: opcodes `0xE0`–`0xE3`; aritmética de punteros sobre A:B reutilizando el sumador EA. `#n` sign-extendido (4 ciclos), `#nn` literal (6 ciclos). Flags C, V, Z de 16 bits. Ver §7.11.
+- [x] **Doble datapath interno (ABUS/DBUS separados)**: ADDRESS PATH de 16 bits (PC, SP, EAR, EA-adder) y DATA PATH de 8 bits (A, B, ALU, MDR) son completamente independientes. La UC los controla mediante campos ortogonales en la microinstrucción. Permite paralelismo address+data en PUSH/CALL/LD indexado. Ver §10.0.
+- [x] **Pipeline 2 etapas (DECODE | EXEC+WB)**: DATA PATH dividido en dos etapas con registro de pipeline. Habilita forwarding bypass (sin stalls en secuencias RAW de registros). Prerrequisito para la especulación de dirección BRAM. Ver §10.5.
+- [x] **Especulación de dirección BRAM**: el ADDRESS PATH emite la dirección al RAMB18 al final de DECODE para modos `[n]`, `[B]`, stack, `[nn]`, `[nn+B]`. BRAM responde en EXEC+WB → −2 ciclos en todos los accesos a página cero, stack y memoria absoluta respecto a v0.4. No aplica a SRAM externa ni bus I/O. Ver §10.6.
+
+### Descartadas
+
+- [~] **Pipeline 3 etapas (FETCH|DECODE|EXEC|WB)**: requiere hazard unit completa incompatible con microcode; la ganancia marginal de throughput (≤15% sobre el diseño de 2 etapas) no justifica abandonar el microcode ni la complejidad añadida.
 
 ### Pendientes
 
-- [ ] **Implementación microcode**: pendiente de ISA estable (ya cubierta) **y** diseño del *datapath* (señales de control, ancho de la palabra de microinstrucción, secuenciador de estados). No puede comenzar hasta tener el datapath VHDL esbozado. Después: codificar PFQ flush, solapamiento EA, wait states BRAM/SRAM.
+- [ ] **Implementación microcode**: pendiente de ISA estable (ya cubierta) **y** diseño del *datapath* VHDL completo (señales de control de ambas etapas, ancho de la palabra de microinstrucción, secuenciador de estados). Después: codificar PFQ flush, solapamiento EA, forwarding bypass, especulación BRAM y wait states SRAM.
