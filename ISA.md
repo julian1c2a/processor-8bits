@@ -2,8 +2,8 @@
 
 ## Procesador de 8 bits con bus de direcciones de 16 bits
 
-> **Estado: borrador v0.4** — 450 MHz MMCM/PLL; UART1 (segundo canal, puertos 0x05–0x09); acceso atómico a timers 32 bits; UC por microcode; IN/OUT 0xD0–0xD3 definidas.
-> *(v0.3: ALU extendida NEG/INCB/DECB; indexado; I/O separada; interrupciones; PFQ; EA-adder; PUSH/POP 16 b; Nexys 7 100T.)*
+> **Estado: borrador v0.6** — BRAM True Dual-Port (Port B exclusivo de stack); BSR rel8 (3 ciclos); Link Register LR 16 bits; Return Address Stack (RAS, 4 entradas hardware); CALL nn→4 cy, CALL([nn])→6 cy, RET→2 cy.
+> *(v0.5: pipeline 2 etapas DECODE|EXEC+WB; especulación BRAM; ADD16/SUB16; IN/OUT. v0.4: 450 MHz; UART1; timers atómicos. v0.3: NEG/INCB/DECB; indexado; I/O; PFQ; EA-adder; PUSH/POP 16 b.)*
 
 ---
 
@@ -13,7 +13,7 @@
 |------------------------|------------------------------|
 | Anchura de datos       | 8 bits                       |
 | Bus de direcciones     | 16 bits (64 KB)              |
-| Número de registros    | 2 visibles (A, B) + especiales |
+| Número de registros    | 3 visibles (A, B, LR) + especiales |
 | Modelo de ejecución    | Acumulador (resultado → A)   |
 | Endianness             | Little-endian (byte bajo en dirección menor) |
 | Vector de reset        | `0x0000`                     |
@@ -40,6 +40,7 @@ secundario o registro auxiliar.
 | **PC**   | 16   | Program Counter. Apunta a la siguiente instrucción a leer. |
 | **SP**   | 16   | Stack Pointer. Apunta al tope del stack (dirección libre). Stack descendente: PUSH decrementa, POP incrementa. |
 | **F**    |  8   | Registro de Flags (ver sección 3).                        |
+| **LR**   | 16   | Link Register. Almacena la dirección de retorno en `BSR` y `CALL LR, nn`. Permite retorno sin acceso a memoria con `RET LR`. |
 
 > **Nota de diseño:** Los registros internos TMP\_H:TMP\_L (16 bits) y MDR
 > (8 bits) existen en la micro-arquitectura pero **no son accesibles al
@@ -49,6 +50,13 @@ secundario o registro auxiliar.
 > interno: el sumador EA de 16 bits escribe en él durante el pipeline de
 > fetch. Del mismo modo, **PFQ** (Prefetch Queue, 2 bytes + 1 bit de
 > validez) es parte de la UC y no es visible al programador.
+>
+> El **RAS** (Return Address Stack, 4 entradas × 16 bits) es un mini-stack
+> hardware interno de 64 bits en flip-flops, **no visible al programador**.
+> Se empuja en cualquier `CALL`/`BSR` y se consulta por la UC en `RET`
+> para especulación anticipada del PC (§10.9). Desbordamiento (>4 niveles
+> anidados) descarta la entrada más antigua sin generar fallo de corrección
+> (Port B siempre confirma el valor real).
 
 ---
 
@@ -313,10 +321,30 @@ ejecución; el ensamblador emite `addr_low` y `addr_high` del base.
 | `0x72` | `JPN page8`     | 2     | PC ← PC[15:8] : page8  *(misma página)*                     | 4      | —     |
 | `0x73` | `JP ([nn])`     | 3     | PC ← M[nn+1]:M[nn]  *(salto indirecto)*                     | 8      | —     |
 | `0x74` | `JP A:B`        | 1     | PC ← A:B  *(salto computado)*                               | 2      | —     |
-| `0x75` | `CALL nn`       | 3     | SP−=2; M[SP+1]:M[SP]←PC; PC←nn                             | 8      | —     |
-| `0x76` | `CALL ([nn])`   | 3     | SP−=2; M[SP+1]:M[SP]←PC; PC←M[nn+1]:M[nn]                  | 10     | —     |
-| `0x77` | `RET`           | 1     | PC←M[SP+1]:M[SP]; SP+=2                                     | 6      | —     |
+| `0x75` | `CALL nn`       | 3     | LR←PC+3; SP−=2; M[SP+1]:M[SP]←PC+3; PC←nn *(TDP Port B)*  | **4**  | —     |
+| `0x76` | `CALL ([nn])`   | 3     | LR←PC+3; SP−=2; M[SP+1]:M[SP]←PC+3; PC←M[nn+1]:M[nn]      | **6**  | —     |
+| `0x77` | `RET`           | 1     | PC←M[SP+1]:M[SP]; SP+=2  *(Port B; RAS especula PC)*        | **2**  | —     |
+| `0xF0` | `BSR rel8`      | 2     | LR←PC+2; SP−=2; M[SP+1]:M[SP]←PC+2; PC←PC+sign_ext(rel8)  | **3**  | —     |
+| `0xF1` | `RET LR`        | 1     | PC←LR  *(sin acceso a memoria)*                             | **1**  | —     |
+| `0xF2` | `CALL LR, nn`   | 3     | LR←PC+3; PC←nn  *(retorno en LR, sin push stack)*           | **3**  | —     |
 
+> **`BSR rel8`** es la variante de 2 bytes de `CALL nn`. Al ser instrucción de
+> 2 bytes, target (`PC+sign_ext(rel8)`) y ret_addr (`PC+2`) se conocen al
+> final de DECODE. TDP Port B escribe el retorno en paralelo con el primer
+> fetch desde el nuevo PC → **3 ciclos**.
+>
+> **`RET LR`** en funciones hoja (*leaf functions*) evita por completo el acceso
+> a memoria: el retorno está en LR → **1 ciclo**.
+>
+> **`CALL LR, nn`** guarda ret_addr en LR pero **no** hace push al stack. Útil
+> para llamadas a funciones hoja donde el llamador sabe que la callee no
+> necesita el stack de retorno.
+>
+> **`RET` convencional** (opcode `0x77`): la UC consulta RAS_top y especula el
+> PC del ciclo siguiente (§10.9). Si RAS acierta (caso habitual) → **2 ciclos**
+> sin penalización. Port B confirma M[SP] en paralelo; si difieren → 1 ciclo
+> extra de corrección.
+>
 > **`JR rel8` vs `JPN page8`:**
 > `JR` (relativo) es más general: puede alcanzar cualquier página si se
 > encadena. `JPN` es útil en bucles de página única donde se quiere
@@ -537,6 +565,8 @@ ADD16/SUB16[ *  -  *  *  -  -  -  -  ]   (C/V/Z de 16 bits; Z si A:B=0x0000)
 6x PUSHA PUSHB PUSHF POPA POPB POPF  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
 7x   JP   JR  JPN  JP() JP CALL CALL  RET  ---  ---  ---  ---  ---  ---  ---  ---
        nn   r8   p8  [nn] A:B   nn  [nn]
+Fx  BSR  RET CALL  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
+    r8    LR LR,nn
 8x  BEQ  BNE  BCS  BCC  BVS  BVC  BGT  BLE  BGE  BLT  BHC BEQ2  ---  ---  ---  ---
 9x  ADD  ADC  SUB  SBB  AND   OR  XOR  CMP  MUL  MUH  ---  ---  ---  ---  ---  ---
 Ax ADD# ADC# SUB# SBB# AND#  OR# XOR# CMP#  ---  ---  ---  ---  ---  ---  ---  ---
@@ -550,6 +580,10 @@ Fx  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  -
 ```
 
 Los opcodes marcados con `---` están **reservados** para extensiones futuras.
+
+> `0xF0` = `BSR rel8`, `0xF1` = `RET LR`, `0xF2` = `CALL LR, nn`.
+> `0x68` = `PUSH LR`, `0x69` = `POP LR` (provisionales — pendiente §7.3).
+> Resto de la fila `Fx` y `6x` libres.
 
 ---
 
@@ -768,52 +802,179 @@ la especulación puede proceder igualmente.
 
 ---
 
-## 11. Ciclos de Bus — Estimación Revisada (v0.5)
+### 10.7 BRAM True Dual-Port (TDP) — Port B exclusivo de stack
+
+Los bloques RAMB18E1/RAMB36E1 del Artix-7 tienen **dos puertos independientes**
+(Port A y Port B), cada uno con su propio bus de dirección, datos y señales
+de control, operables en el mismo ciclo de reloj.
+
+```
+  Port A  ←─  ABUS normal  (fetch de instrucciones, datos, página cero)
+  Port B  ←─  SP bus 16 b  (stack exclusivo: PUSH / POP / CALL / RET / BSR)
+```
+
+**Consecuencia directa:** en `CALL nn`, el fetch del byte `addr_hi` (Port A) y
+la escritura del retorno en la pila (Port B) ocurren **en el mismo ciclo**,
+eliminando la dependencia secuencial que imponía la arquitectura de puerto único.
+
+| Instrucción    | Port A (ciclo EXEC)              | Port B (ciclo EXEC)              |
+|----------------|----------------------------------|----------------------------------|
+| `CALL nn`      | primer fetch desde nn            | M[SP−2] ← ret\_addr              |
+| `CALL ([nn])`  | fetch target\_lo / \_hi          | M[SP−2] ← ret\_addr              |
+| `BSR rel8`     | primer fetch desde target        | M[SP−2] ← ret\_addr              |
+| `RET`          | primer fetch desde RAS\_top      | M[SP] → ret\_addr (confirmación) |
+| `PUSH A`       | siguiente fetch PFQ              | M[SP−2] ← A                      |
+| `POP A`        | siguiente fetch PFQ              | M[SP] → A                        |
+
+**Señales nuevas en la UC:** `STK_WE` (Port B write enable), `STK_RE` (Port B
+read enable), `STK_ADDR_SEL` (SP±0, SP±2). Son ortogonales a `MEM_WE`,
+`MEM_RE`, `ABUS_SEL`.
+
+**Restricción:** la mejora sólo aplica mientras el stack resida en **BRAM**.
+Si SP se acerca a la zona SRAM, la UC cae en el comportamiento de puerto único
+de v0.5 (correcto, sin errores, pero sin la reducción de ciclos).
+
+---
+
+### 10.8 BSR rel8 y Link Register (LR)
+
+**BSR rel8** (Branch to Subroutine relativo, opcode `0xF0`) es una instrucción
+de 2 bytes. Al ser de 2 bytes, **todos los valores necesarios están disponibles
+al final de DECODE**:
+
+```
+  target   = PC + sign_ext(PFQ[1])   ←  EA adder (ADDRESS PATH)
+  ret_addr = PC + 2                  ←  PC + constante
+  SP_new   = SP − 2                  ←  cálculo paralelo
+```
+
+Micro-pasos con TDP:
+
+```
+  Ciclo 1  [DECODE]   PFQ[0]=0xF0, PFQ[1]=rel8
+                      Paralelo:  target   = PC + sign_ext(rel8)  (EA adder)
+                                 ret_addr = PC + 2
+                                 SP_new   = SP − 2
+                      RAS.push(ret_addr)          ← sin coste extra
+                      LR ← ret_addr               ← escribe LR
+  Ciclo 2  [EXEC]     Port A: primer fetch desde target  (PFQ refill)
+                      Port B: M[SP_new] ← ret_addr       (push)
+  Ciclo 3             SP ← SP_new; PFQ[0] válido desde target
+```
+
+**BSR rel8: 3 ciclos** (límite teórico para instrucción de 2 bytes con push).
+
+**Link Register (LR)** — registro de 16 bits visible al programador:
+
+- `BSR`, `CALL nn`, `CALL ([nn])` y `CALL LR, nn` escriben `ret_addr` en LR
+  **además** de (o en lugar de) hacerlo en la pila.
+- `RET LR` (opcode `0xF1`) salta a LR sin acceso a memoria: **1 ciclo**.
+- Patrón de función hoja:
+
+  ```asm
+  BSR   my_fn       ; LR ← ret; push stack también (RAS push)
+  ; ...
+  my_fn:
+      ; cuerpo sin llamadas internas
+      RET LR        ; PC ← LR; 1 ciclo; Port B libre para otras ops
+  ```
+
+- Para funciones con llamadas internas usar `RET` convencional; si es necesario
+  preservar LR se puede guardar con `PUSH LR` (opcode provisional `0x68`).
+
+**`CALL LR, nn`** (opcode `0xF2`): guarda ret_addr en LR y salta a nn, **sin**
+push al stack (3 ciclos). Útil cuando el llamador sabe que callee es hoja y
+no usará la pila de retorno.
+
+---
+
+### 10.9 Return Address Stack (RAS) — predictor de retorno hardware
+
+El RAS es una pila LIFO hardware de **4 entradas × 16 bits** implementada en
+flip-flops (64 bits de estado total). No forma parte del mapa de memoria ni
+del stack de software.
+
+**Operación:**
+
+| Evento                         | Acción RAS                                           |
+|--------------------------------|------------------------------------------------------|
+| `CALL` / `BSR` ejecutado       | RAS\_push(ret\_addr)                                 |
+| `RET` detectado en DECODE      | Especula PC ← RAS\_top; emite fetch anticipado       |
+| Port B confirma M\[SP\] = X    | X == RAS\_top → correcto, 0 penalización             |
+|                                | X ≠ RAS\_top → cancelar fetch especulado, 1 ciclo extra |
+| Overflow (> 4 CALL anidados)   | Descarta entrada más antigua; predicción se degrada pero Port B siempre corrige |
+| Entrada a ISR                  | RAS **no** se modifica (la UC no ejecuta un CALL)    |
+| `RTI`                          | RAS **no** se consulta (Port B lee el PC directamente) |
+
+**Ciclos de `RET` con RAS:**
+
+```
+  Ciclo 1  [DECODE]   opcode = RET; UC consulta RAS_top
+                      Especula: PC ← RAS_top; emite fetch desde RAS_top
+                      Port B: inicia lectura de M[SP] (confirmación)
+  Ciclo 2  [EXEC]     SP ← SP + 2;  compara M[SP] vs RAS_top
+                      → Iguales (caso habitual): PFQ[0] ya válido → 2 ciclos
+                      → Distintos:  flush + re-fetch desde M[SP]  → 3 ciclos
+```
+
+**Resultado habitual: RET = 2 ciclos.**
+
+**Interacción con LR:** cuando una función hoja usa `RET LR`, el `CALL`/`BSR`
+previo igualmente hizo RAS\_push; ese tope queda en el RAS y se descartará al
+retornar el nivel superior con `RET` convencional (el Port B leerá el
+valor correcto del stack y el RAS se consumirá en orden).
+
+---
+
+## 11. Ciclos de Bus — Estimación Revisada (v0.6)
 
 Modelo: PFQ 2 bytes, EA-adder solapado, PUSH/POP 16 bits, pipeline 2 etapas
-DECODE|EXEC+WB, especulación de dirección BRAM (§10.5–10.6), SRAM 5 ciclos.
+DECODE|EXEC+WB, especulación BRAM, BRAM TDP Port B = stack exclusivo (§10.7), LR (§10.8), RAS 4 entradas (§10.9).
 
-| Instrucción        | Sin optim. | v0.4 | **v0.5** | Notas (v0.5)                                |
-|--------------------|------------|------|----------|---------------------------------------------|
-| NOP / HALT         | 4          | 2    | **2**    | —                                           |
-| 1-byte ALU (reg)   | 4          | 2    | **2**    | —                                           |
-| `LD A, #n`         | 6          | 2    | **2**    | —                                           |
-| `LD A, B`          | 4          | 2    | **2**    | —                                           |
-| `LD A, [n]`        | 8          | 4    | **2**    | Spec pág-cero: addr emitida en DECODE       |
-| `ST A, [n]`        | 8          | 4    | **2**    | Spec pág-cero: addr emitida en DECODE       |
-| `LD A, [nn]`       | 10         | 6    | **4**    | addr\_hi fin DECODE; BRAM en EXEC           |
-| `ST A, [nn]`       | 10         | 6    | **4**    | ídem                                        |
-| `LD A, [nn+B]`     | 12         | 6    | **4**    | EAR spec fin DECODE; BRAM en EXEC           |
-| `ST A, [nn+B]`     | 12         | 6    | **4**    | ídem                                        |
-| `ADD #n`           | 6          | 2    | **2**    | —                                           |
-| `ADD [n]`          | 10         | 4    | **2**    | Spec BRAM + forward → ALU en EXEC           |
-| `ADD [nn+B]`       | 14         | 8    | **6**    | EAR spec; BRAM; ALU; WB                     |
-| `JP nn`            | 10         | 6    | **4**    | PC load en DECODE; flush inmediato          |
-| `JR rel8`          | 6/8        | 2/4  | **2/4**  | —                                           |
-| `JP A:B`           | 4          | 2    | **2**    | —                                           |
-| `CALL nn`          | 14         | 8    | **6**    | SP−2 en DECODE; push PC en EXEC             |
-| `CALL ([nn])`      | 18         | 10   | **8**    | ídem + lectura indirecta                    |
-| `RET`              | 10         | 6    | **4**    | Spec stack: SP→BRAM en DECODE               |
-| `RTI`              | 12         | 8    | **6**    | 2× pop BRAM en cadena con spec              |
-| `PUSH A`           | 6          | 4    | **2**    | SP−2 en DECODE; write BRAM en EXEC          |
-| `POP A`            | 6          | 4    | **2**    | Spec: SP→BRAM en DECODE; WB en EXEC         |
-| `PUSH A:B`         | 6          | 4    | **2**    | ídem PUSH A                                 |
-| `POP A:B`          | 6          | 4    | **2**    | ídem POP A                                  |
-| `BEQ rel8`         | 6/8        | 2/4  | **2/4**  | —                                           |
-| `IN A, #n`         | 6          | 4    | **4**    | Bus I/O externo; sin spec                   |
-| `IN A, [B]`        | 4          | 2    | **2**    | —                                           |
-| `OUT #n, A`        | 6          | 4    | **4**    | Bus I/O externo; sin spec                   |
-| `OUT [B], A`       | 4          | 2    | **2**    | —                                           |
-| `ADD16 #n`         | —          | 4    | **4**    | —                                           |
-| `ADD16 #nn`        | —          | 6    | **4**    | EA-addr spec fin DECODE                     |
-| `SUB16 #n`         | —          | 4    | **4**    | —                                           |
-| `SUB16 #nn`        | —          | 6    | **4**    | EA-addr spec fin DECODE                     |
+| Instrucción        | Sin optim. | v0.4 | v0.5 | **v0.6** | Notas (v0.6)                                        |
+|--------------------|------------|------|------|----------|-----------------------------------------------------|
+| NOP / HALT         | 4          | 2    | 2    | **2**    | —                                                   |
+| 1-byte ALU (reg)   | 4          | 2    | 2    | **2**    | —                                                   |
+| `LD A, #n`         | 6          | 2    | 2    | **2**    | —                                                   |
+| `LD A, B`          | 4          | 2    | 2    | **2**    | —                                                   |
+| `LD A, [n]`        | 8          | 4    | 2    | **2**    | —                                                   |
+| `ST A, [n]`        | 8          | 4    | 2    | **2**    | —                                                   |
+| `LD A, [nn]`       | 10         | 6    | 4    | **4**    | —                                                   |
+| `ST A, [nn]`       | 10         | 6    | 4    | **4**    | —                                                   |
+| `LD A, [nn+B]`     | 12         | 6    | 4    | **4**    | —                                                   |
+| `ST A, [nn+B]`     | 12         | 6    | 4    | **4**    | —                                                   |
+| `ADD #n`           | 6          | 2    | 2    | **2**    | —                                                   |
+| `ADD [n]`          | 10         | 4    | 2    | **2**    | —                                                   |
+| `ADD [nn+B]`       | 14         | 8    | 6    | **6**    | —                                                   |
+| `JP nn`            | 10         | 6    | 4    | **4**    | —                                                   |
+| `JR rel8`          | 6/8        | 2/4  | 2/4  | **2/4**  | —                                                   |
+| `JP A:B`           | 4          | 2    | 2    | **2**    | —                                                   |
+| `CALL nn`          | 14         | 8    | 6    | **4**    | TDP: fetch addr\_hi ‖ Port B push; LR←ret; RAS push |
+| `CALL ([nn])`      | 18         | 10   | 8    | **6**    | TDP: push ‖ fetch; +2 cy lectura indirecta          |
+| `BSR rel8`         | —          | —    | —    | **3**    | 2-byte; target+ret en DECODE; TDP Port B push       |
+| `RET`              | 10         | 6    | 4    | **2**    | RAS especula PC; Port B confirma en paralelo        |
+| `RET LR`           | —          | —    | —    | **1**    | PC←LR; sin acceso a memoria                         |
+| `CALL LR, nn`      | —          | —    | —    | **3**    | LR←PC+3; PC←nn; sin push stack                     |
+| `RTI`              | 12         | 8    | 6    | **4**    | Port B: pop F ‖ Port A: fetch; pop PC (Port B)      |
+| `PUSH A`           | 6          | 4    | 2    | **2**    | —                                                   |
+| `POP A`            | 6          | 4    | 2    | **2**    | —                                                   |
+| `PUSH A:B`         | 6          | 4    | 2    | **2**    | —                                                   |
+| `POP A:B`          | 6          | 4    | 2    | **2**    | —                                                   |
+| `BEQ rel8`         | 6/8        | 2/4  | 2/4  | **2/4**  | —                                                   |
+| `IN A, #n`         | 6          | 4    | 4    | **4**    | Bus I/O externo; sin spec                           |
+| `IN A, [B]`        | 4          | 2    | 2    | **2**    | —                                                   |
+| `OUT #n, A`        | 6          | 4    | 4    | **4**    | Bus I/O externo; sin spec                           |
+| `OUT [B], A`       | 4          | 2    | 2    | **2**    | —                                                   |
+| `ADD16 #n`         | —          | 4    | 4    | **4**    | —                                                   |
+| `ADD16 #nn`        | —          | 6    | 4    | **4**    | —                                                   |
+| `SUB16 #n`         | —          | 4    | 4    | **4**    | —                                                   |
+| `SUB16 #nn`        | —          | 6    | 4    | **4**    | —                                                   |
 
-> Ciclos expresados en **ciclos de reloj** (1 ciclo = 1 período).
-> **v0.4** = PFQ + EA-adder + stack 16 b (referencia anterior).
-> **v0.5** añade pipeline DECODE|EXEC+WB (§10.5) y especulación de dirección BRAM (§10.6).
-> La especulación **no** aplica a SRAM externa ni bus I/O.
-> Referencia: **450 MHz** (MMCM/PLL Artix-7), BRAM 1 ciclo, SRAM 5 ciclos (4 wait states).
+> Ciclos expresados en **ciclos de reloj** (1 ciclo = 1 período @ 450 MHz).
+> **v0.5** = pipeline DECODE|EXEC+WB + especulación BRAM (referencia anterior).
+> **v0.6** añade BRAM TDP Port B exclusivo (§10.7), BSR/LR (§10.8) y RAS (§10.9).
+> TDP y especulación **no** aplican a SRAM externa ni bus I/O.
+> `RET` en 2 ciclos asume predicción RAS correcta (95%+ en código estructurado); peor caso = 3 ciclos.
 
 ---
 
@@ -915,6 +1076,10 @@ isr:
 - [x] **Doble datapath interno (ABUS/DBUS separados)**: ADDRESS PATH de 16 bits (PC, SP, EAR, EA-adder) y DATA PATH de 8 bits (A, B, ALU, MDR) son completamente independientes. La UC los controla mediante campos ortogonales en la microinstrucción. Permite paralelismo address+data en PUSH/CALL/LD indexado. Ver §10.0.
 - [x] **Pipeline 2 etapas (DECODE | EXEC+WB)**: DATA PATH dividido en dos etapas con registro de pipeline. Habilita forwarding bypass (sin stalls en secuencias RAW de registros). Prerrequisito para la especulación de dirección BRAM. Ver §10.5.
 - [x] **Especulación de dirección BRAM**: el ADDRESS PATH emite la dirección al RAMB18 al final de DECODE para modos `[n]`, `[B]`, stack, `[nn]`, `[nn+B]`. BRAM responde en EXEC+WB → −2 ciclos en todos los accesos a página cero, stack y memoria absoluta respecto a v0.4. No aplica a SRAM externa ni bus I/O. Ver §10.6.
+- [x] **BRAM True Dual-Port (TDP)**: Port B exclusivo para la pila; Port A para programa/datos/página-cero. Las señales `STK_WE`, `STK_RE`, `STK_ADDR_SEL` son ortogonales a `MEM_WE`/`MEM_RE`/`ABUS_SEL`. `CALL nn` → 4 ciclos, `CALL ([nn])` → 6 ciclos, `RET` → 2 ciclos. Ver §10.7.
+- [x] **BSR rel8** (opcode `0xF0`): CALL relativo de 2 bytes, 3 ciclos. Target y dirección de retorno calculados al final de DECODE mediante el sumador EA; push vía TDP Port B. Actualiza LR. Ideal para funciones dentro de ±127 bytes. Ver §10.8.
+- [x] **Link Register (LR)**: registro visible de 16 bits (#3 tras A, B). Escrito por `CALL nn`, `CALL ([nn])`, `BSR rel8` y `CALL LR, nn`. Leído por `RET LR` (opcode `0xF1`, 1 ciclo, sin acceso a memoria) e instrucciones de stack. `CALL LR, nn` (opcode `0xF2`, 3 ciclos): guarda ret_addr en LR y salta a nn sin push; apto para callees hoja. `PUSH LR`/`POP LR` pendientes (opcodes provisionales `0x68`/`0x69`). Ver §10.8.
+- [x] **Return Address Stack (RAS, 4 entradas)**: 64 bits implementados en flip-flops (no BRAM). Push en cualquier `CALL`/`BSR`; pop especulativo en el DECODE de `RET` → emite fetch al nuevo PC sin esperar la confirmación de memoria. Port B confirma en EXEC+WB: coincidencia = 2 ciclos, fallo = 3 ciclos (descarta fetch especulativo). ISR e `RTI` no interactúan con el RAS. Ver §10.9.
 
 ### Descartadas
 
@@ -922,4 +1087,5 @@ isr:
 
 ### Pendientes
 
-- [ ] **Implementación microcode**: pendiente de ISA estable (ya cubierta) **y** diseño del *datapath* VHDL completo (señales de control de ambas etapas, ancho de la palabra de microinstrucción, secuenciador de estados). Después: codificar PFQ flush, solapamiento EA, forwarding bypass, especulación BRAM y wait states SRAM.
+- [ ] **Implementación microcode**: diseño del *datapath* VHDL completo (señales de control de ambas etapas, ancho de la palabra de microinstrucción, secuenciador de estados). Incluye señales TDP (`STK_WE`/`STK_RE`/`STK_ADDR_SEL`), LR, RAS, BSR, codificación `0xF0`/`0xF1`/`0xF2`; además de PFQ flush, solapamiento EA, forwarding bypass, especulación BRAM y wait states SRAM.
+- [ ] **PUSH LR / POP LR**: opcodes provisionales `0x68`/`0x69`. Añadir a §7.3 (stack), §8 (flags), §9 (mapa de opcodes) y §11 (ciclos) cuando se confirme la codificación definitiva.
