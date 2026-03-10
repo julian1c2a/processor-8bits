@@ -43,8 +43,9 @@ $(BUILDDIR)/%.o: $(SRCDIR_TB)/%.vhdl
 	$(GHDL) -a $(GHDLFLAGS) $<
 
 $(BUILDDIR_TESTS)/%_tb$(EXT): $(SRCDIR_TB)/%_tb.vhdl $(OBJS_PROC) $(OBJS_TB)
-	$(GHDL) -e $(GHDLFLAGS) -o $(BUILDDIR)/$(patsubst $(SRCDIR_TB)/%_tb.vhdl, %_tb, $<)$(EXT) $(patsubst $(SRCDIR_TB)/%_tb.vhdl, %_tb, $<)
-	mv $(BUILDDIR)/$(patsubst $(SRCDIR_TB)/%_tb.vhdl, %_tb, $<)$(EXT) $@
+	@mkdir -p $(BUILDDIR_TESTS)
+	$(GHDL) -e $(GHDLFLAGS) -o $(BUILDDIR)/$(notdir $(basename $<))$(EXT) $(notdir $(basename $<))
+	mv $(BUILDDIR)/$(notdir $(basename $<))$(EXT) $@
 
 clean:
 	rm -rf $(BUILDDIR)/*
