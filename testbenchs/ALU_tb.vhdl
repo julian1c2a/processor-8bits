@@ -8,7 +8,7 @@ use STD.TEXTIO.ALL;
 entity ALU_tb is
 end entity ALU_tb;
 
-architecture behavior of ALU_tb is
+architecture unique of ALU_tb is
 
     -- 1. Declarar el componente que vamos a probar (nuestra ALU)
     component ALU is
@@ -20,7 +20,7 @@ architecture behavior of ALU_tb is
             RegOutACC : out STD_LOGIC_VECTOR(7 downto 0);
             RegStatus : out STD_LOGIC_VECTOR(7 downto 0)
         );
-    end component;
+    end component ALU;
 
     -- 2. Señales para conectar a los puertos del componente
     signal s_RegInA    : STD_LOGIC_VECTOR(7 downto 0) := (others => '0');
