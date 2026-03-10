@@ -64,7 +64,7 @@ begin
                 v_RegStatus(6) := nibble_res(4); -- fH
 
                 -- Suma principal de 8 bits. Extendemos a 9 bits para capturar el Carry.
-                acc_ext := resize(signed(RegInA), 9) + resize(signed(RegInB), 9);
+                acc_ext := signed(resize(unsigned(RegInA), 9) + resize(unsigned(RegInB), 9));
                 v_RegStatus(7) := acc_ext(8); -- fC
 
                 -- Overflow (V): si los signos de los operandos son iguales y el del resultado es diferente.
@@ -76,7 +76,7 @@ begin
                 nibble_res := nibbleA_ext + nibbleB_ext + unsigned'('0' & Carry_in);
                 v_RegStatus(6) := nibble_res(4); -- fH
 
-                acc_ext := resize(signed(RegInA), 9) + resize(signed(RegInB), 9) + signed'("0" & Carry_in);
+                acc_ext := signed(resize(unsigned(RegInA), 9) + resize(unsigned(RegInB), 9) + resize(unsigned'('0' & Carry_in),9));
                 v_RegStatus(7) := acc_ext(8); -- fC
 
                 if RegInA(7) = RegInB(7) and acc_ext(7) /= RegInA(7) then

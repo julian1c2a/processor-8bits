@@ -58,31 +58,38 @@ begin
             constant expected_acc   : in STD_LOGIC_VECTOR(7 downto 0);
             constant expected_flags : in STD_LOGIC_VECTOR(7 downto 0)
         ) is
+            variable acc_ok   : boolean;
+            variable flags_ok : boolean;
         begin
             -- Espera un ciclo para que la salida se estabilice
             wait for clk_period;
 
+            acc_ok   := s_RegOutACC = expected_acc;
+            flags_ok := s_RegStatus = expected_flags;
+
             -- Verificar la salida del acumulador (ACC)
-            assert s_RegOutACC = expected_acc
+            assert acc_ok
                 report "ERROR en " & case_name & ": ACC" &
                        " | Esperado: 0x" & to_hstring(expected_acc) &
                        " | Obtenido: 0x" & to_hstring(s_RegOutACC)
                 severity error;
 
             -- Verificar los flags de estado
-            assert s_RegStatus = expected_flags
+            assert flags_ok
                 report "ERROR en " & case_name & ": Flags" &
                        " | Esperado: 0b" & to_bstring(expected_flags) &
                        " | Obtenido: 0b" & to_bstring(s_RegStatus)
                 severity error;
 
             -- Si las aserciones pasan, reportar éxito
-            report "[OK] " & case_name &
-                " | A: 0x" & to_hstring(s_RegInA) &
-                " | B: 0x" & to_hstring(s_RegInB) &
-                " => ACC: 0x" & to_hstring(s_RegOutACC) &
-                " | Flags(CHVZGELR): " & to_bstring(s_RegStatus)
-                severity note;
+            if acc_ok and flags_ok then
+                report "[OK] " & case_name &
+                    " | A: 0x" & to_hstring(s_RegInA) &
+                    " | B: 0x" & to_hstring(s_RegInB) &
+                    " => ACC: 0x" & to_hstring(s_RegOutACC) &
+                    " | Flags(CHVZGELR): " & to_bstring(s_RegStatus)
+                    severity note;
+            end if;
         end procedure;
 
     begin
@@ -106,29 +113,29 @@ begin
         s_RegInA <= x"FF"; -- 255 (o -1 en C2)
         s_RegInB <= x"01"; -- 1
         s_Oper   <= OP_ADD;
-        -- Flags esperados: C=1, H=1, Z=1, G=1, E=0 -> 11.110.
-        check_case("CASO 3: ADD con Carry | 255 + 1", x"00", x"D8");
+        -- Flags esperados: C=1, H=1, Z=1 -> 11.1....
+        check_case("CASO 3: ADD con Carry | 255 + 1", x"00", x"D0");
 
         -- Caso 4: ADD con Overflow (127 + 1 = -128)
         s_RegInA <= "01111111"; -- 127
         s_RegInB <= "00000001"; -- 1
         s_Oper   <= OP_ADD;
-        -- Flags esperados: V=1, G=1, E=0 -> .01..10.
-        check_case("CASO 4: ADD con Overflow | 127 + 1", x"80", x"28");
+        -- Flags esperados: H=1, V=1, G=1 -> .11.1...
+        check_case("CASO 4: ADD con Overflow | 127 + 1", x"80", x"68");
 
         -- Caso 5: SUB simple (10 - 5 = 5)
         s_RegInA <= std_logic_vector(to_signed(10, 8));
         s_RegInB <= std_logic_vector(to_signed(5, 8));
         s_Oper   <= OP_SUB;
-        -- Flags esperados: C=1 (no borrow), G=1, E=0 -> 1...10.
-        check_case("CASO 5: SUB | 10 - 5", x"05", x"88");
+        -- Flags esperados: C=1 (no borrow), H=1 (no borrow), G=1 -> 11..1...
+        check_case("CASO 5: SUB | 10 - 5", x"05", x"C8");
 
         -- Caso 6: SUB con resultado cero (10 - 10 = 0)
         s_RegInA <= std_logic_vector(to_signed(10, 8));
         s_RegInB <= std_logic_vector(to_signed(10, 8));
         s_Oper   <= OP_SUB;
-        -- Flags esperados: C=1 (no borrow), Z=1, E=1 -> 1..1.1.
-        check_case("CASO 6: SUB con Flag Zero | 10 - 10", x"00", x"94");
+        -- Flags esperados: C=1, H=1, Z=1, E=1 -> 11.1.1..
+        check_case("CASO 6: SUB con Flag Zero | 10 - 10", x"00", x"D4");
 
         -- Caso 7: SUB con Borrow (5 - 10 = -5)
         s_RegInA <= std_logic_vector(to_signed(5, 8));
