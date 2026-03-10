@@ -146,14 +146,12 @@ def ref_ROR(a, b, cin):
 def ref_INC(a, b, cin):
     nh = (a & 0xF) + 1
     H = 1 if nh > 0xF else 0
-    # ALU: acc_ext = resize(signed(RegInA),9) + 1  → fC = acc_ext(8)
-    # signed 9-bit: si el resultado signed(a)+1 necesita más de 8 bits signed
-    full9 = sign8(a) + 1
+    # ALU VHDL: acc_ext = resize(signed(RegInA), 9) + 1
+    # fC = acc_ext(8)  <- bit de signo del resultado signed 9-bit
+    full9 = sign8(a) + 1   # aritmética signed 9-bit
     acc = u8(full9)
-    # acc_ext(8) en VHDL signed 9-bit: bit8 = carry out, que es bit 8 unsigned
-    # Para INC: resize unsigned a 9 bits y sumar 1
-    full9u = a + 1
-    C = 1 if full9u > 0xFF else 0
+    # acc_ext(8) equivale al bit de signo del resultado en 9 bits signed
+    C = 1 if full9 < 0 else 0
     V = 1 if a == 0x7F else 0
     G, E = common_GE(a, b)
     Z = common_Z(acc)

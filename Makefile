@@ -8,6 +8,8 @@ BUILDDIR    = build
 BUILDDIR_TESTS = $(BUILDDIR)/build_tests
 
 # GHDL options
+# En MSYS2 MinGW64 el binario está en /mingw64/bin/ghdl
+# Desde PowerShell: añadir C:\msys64\mingw64\bin al PATH o usar mingw32-make
 GHDL      = /mingw64/bin/ghdl
 GHDLFLAGS = --std=08 --workdir=$(BUILDDIR)
 
