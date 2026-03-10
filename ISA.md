@@ -2,7 +2,8 @@
 
 ## Procesador de 8 bits con bus de direcciones de 16 bits
 
-> **Estado: borrador v0.2** — ALU extendida (NEG, INCB, DECB); modos indexados; I/O independiente; modelo de interrupciones.
+> **Estado: borrador v0.4** — 450 MHz MMCM/PLL; UART1 (segundo canal, puertos 0x05–0x09); acceso atómico a timers 32 bits; UC por microcode; IN/OUT 0xD0–0xD3 definidas.
+> *(v0.3: ALU extendida NEG/INCB/DECB; indexado; I/O separada; interrupciones; PFQ; EA-adder; PUSH/POP 16 b; Nexys 7 100T.)*
 
 ---
 
@@ -16,7 +17,13 @@
 | Modelo de ejecución    | Acumulador (resultado → A)   |
 | Endianness             | Little-endian (byte bajo en dirección menor) |
 | Vector de reset        | `0x0000`                     |
-| Stack                  | Descendente, SP inicial `0xFFFF` |
+| Stack                  | Descendente, SP inicial `0xFFFE` (alineado a par) |
+| Ancho del stack-bus    | 16 bits (PUSH/POP de palabra) |
+| Prefetch               | Cola de 2 bytes              |
+| SRAM página cero       | BlockRAM dedicada, 1 ciclo   |
+| Plataforma             | Nexys 7 100T (Artix-7 XC7A100T) |
+| Frecuencia de reloj    | 450 MHz (MMCM/PLL interno; SRAM ext. 4 wait states) |
+| Unidad de Control      | Microcode (ROM de microinstrucciones) |
 
 El procesador es de arquitectura **acumulador**: la ALU toma A y B como
 operandos y el resultado siempre vuelve a A. B actúa como operando
@@ -37,6 +44,11 @@ secundario o registro auxiliar.
 > **Nota de diseño:** Los registros internos TMP\_H:TMP\_L (16 bits) y MDR
 > (8 bits) existen en la micro-arquitectura pero **no son accesibles al
 > programador**.
+>
+> El registro **EAR** (Effective Address Register, 16 bits) también es
+> interno: el sumador EA de 16 bits escribe en él durante el pipeline de
+> fetch. Del mismo modo, **PFQ** (Prefetch Queue, 2 bytes + 1 bit de
+> validez) es parte de la UC y no es visible al programador.
 
 ---
 
@@ -110,28 +122,33 @@ Acceso exclusivo mediante `IN A, #n` / `OUT #n, A` (o variantes con `[B]`).
 | `0x02` | UART_CTRL   |  W  | `[3]` TX_EN · `[2]` RX_EN · `[1]` TX_IE · `[0]` RX_IE |
 | `0x03` | UART_BAUD_L |  W  | Divisor de baudrate — byte bajo |
 | `0x04` | UART_BAUD_H |  W  | Divisor de baudrate — byte alto |
-| `0x05–0x0F` | —      | —   | Reservados (expansión UART / segundo canal) |
-| `0x10` | TMR0_CNT0   | R/W | Timer 0: contador bits  7:0  |
-| `0x11` | TMR0_CNT1   | R/W | Timer 0: contador bits 15:8  |
-| `0x12` | TMR0_CNT2   | R/W | Timer 0: contador bits 23:16 |
-| `0x13` | TMR0_CNT3   | R/W | Timer 0: contador bits 31:24 |
+| `0x05` | UART1_DATA   | R/W | UART1: TX (W) / RX (R). Segundo canal serie. |
+| `0x06` | UART1_STAT   |  R  | `[3]` TX busy · `[2]` RX ready · `[1]` TX_IE · `[0]` RX_IE |
+| `0x07` | UART1_CTRL   |  W  | `[3]` TX_EN · `[2]` RX_EN · `[1]` TX_IE · `[0]` RX_IE |
+| `0x08` | UART1_BAUD_L |  W  | Divisor baudrate UART1 — byte bajo |
+| `0x09` | UART1_BAUD_H |  W  | Divisor baudrate UART1 — byte alto |
+| `0x0A–0x0F` | —      | —   | Reservados |
+| `0x10` | TMR0_CNT0   | R/W | Timer 0: bits 7:0. Lectura: **latch atómico** — captura los 32 bits en registro sombra; CNT1–3 retornan el snapshot. Escritura: precarga (timer detenido). |
+| `0x11` | TMR0_CNT1   |  R  | Timer 0: bits 15:8 del snapshot atómico (válido tras leer CNT0). |
+| `0x12` | TMR0_CNT2   |  R  | Timer 0: bits 23:16 del snapshot atómico. |
+| `0x13` | TMR0_CNT3   |  R  | Timer 0: bits 31:24 del snapshot atómico. |
 | `0x14` | TMR0_RLD0   | R/W | Timer 0: valor de recarga bits  7:0  |
 | `0x15` | TMR0_RLD1   | R/W | Timer 0: valor de recarga bits 15:8  |
 | `0x16` | TMR0_RLD2   | R/W | Timer 0: valor de recarga bits 23:16 |
 | `0x17` | TMR0_RLD3   | R/W | Timer 0: valor de recarga bits 31:24 |
 | `0x18` | TMR0_CTRL   | R/W | `[2]` IRQ_EN · `[1]` auto-reload · `[0]` run/stop |
 | `0x19–0x1F` | —      | —   | Reservados Timer 0 |
-| `0x20` | TMR1_CNT0   | R/W | Timer 1: ídem Timer 0 (offset +0x10) |
-| `0x21` | TMR1_CNT1   | R/W | ↑ |
-| `0x22` | TMR1_CNT2   | R/W | ↑ |
-| `0x23` | TMR1_CNT3   | R/W | ↑ |
+| `0x20` | TMR1_CNT0   | R/W | Timer 1: bits 7:0. Latch atómico ídem TMR0_CNT0. |
+| `0x21` | TMR1_CNT1   |  R  | Timer 1: bits 15:8 del snapshot atómico. |
+| `0x22` | TMR1_CNT2   |  R  | Timer 1: bits 23:16 del snapshot atómico. |
+| `0x23` | TMR1_CNT3   |  R  | Timer 1: bits 31:24 del snapshot atómico. |
 | `0x24` | TMR1_RLD0   | R/W | ↑ |
 | `0x25` | TMR1_RLD1   | R/W | ↑ |
 | `0x26` | TMR1_RLD2   | R/W | ↑ |
 | `0x27` | TMR1_RLD3   | R/W | ↑ |
 | `0x28` | TMR1_CTRL   | R/W | ↑ |
 | `0x29–0x2F` | —      | —   | Reservados Timer 1 |
-| `0x30` | IMR         | R/W | Máscara de interrupciones (1=habilitada) `[2]`TMR1 · `[1]`TMR0 · `[0]`UART |
+| `0x30` | IMR         | R/W | Máscara de interrupciones (1=habilitada): `[3]`UART1 · `[2]`TMR1 · `[1]`TMR0 · `[0]`UART0 |
 | `0x31` | IFR         | R/W | Flags pendientes (read=get, write 1=clear) |
 | `0x32` | IVL         | R/W | Byte bajo del vector IRQ (también en `0xFFFE`) |
 | `0x33` | IVH         | R/W | Byte alto del vector IRQ (también en `0xFFFF`) |
@@ -206,7 +223,7 @@ ejecución; el ensamblador emite `addr_low` y `addr_high` del base.
 | `0x03` | `CLC`      | 1     | C ← 0                  | C     |
 | `0x04` | `SEI`      | 1     | I ← 1 (habilita interrupciones enmascarables) | — |
 | `0x05` | `CLI`      | 1     | I ← 0 (deshabilita interrupciones enmascarables) | — |
-| `0x06` | `RTI`      | 1     | SP++; F←M[SP]; SP++; PCL←M[SP]; SP++; PCH←M[SP]; I←1 | todos |
+| `0x06` | `RTI`      | 1     | F←M[SP]; SP+=2; PC←M[SP+1]:M[SP]; SP+=2; I←1 *(pop F luego pop PC)* | todos |
 
 ---
 
@@ -261,29 +278,44 @@ ejecución; el ensamblador emite `addr_low` y `addr_high` del base.
 
 ### 7.3 Stack — PUSH / POP
 
-| Opcode | Mnemónico  | Bytes | Operación                          | Flags |
-|--------|------------|-------|------------------------------------|-------|
-| `0x60` | `PUSH A`   | 1     | M[SP] ← A;  SP ← SP − 1           | —     |
-| `0x61` | `PUSH B`   | 1     | M[SP] ← B;  SP ← SP − 1           | —     |
-| `0x62` | `PUSH F`   | 1     | M[SP] ← F;  SP ← SP − 1           | —     |
-| `0x63` | `POP A`    | 1     | SP ← SP + 1;  A ← M[SP]           | Z     |
-| `0x64` | `POP B`    | 1     | SP ← SP + 1;  B ← M[SP]           | —     |
-| `0x65` | `POP F`    | 1     | SP ← SP + 1;  F ← M[SP]           | todos |
+> **Stack de 16 bits.** Las operaciones PUSH/POP transfieren una **palabra
+> de 16 bits** en un solo ciclo de bus de stack (dos bytes en paralelo).
+> SP se decrementa/incrementa siempre de 2 en 2 y **debe quedar alineado
+> a direcciones pares** en todo momento. El SP inicial es `0xFFFE`.
+>
+> El byte de flags F (8 bits) se empuja con padding `0x00` en el byte
+> alto: `M[SP+1]:M[SP] ← 0x00:F`; al hacer POP sólo se restauran los 8
+> bits bajos.
+
+| Opcode | Mnemónico   | Bytes | Operación                                    | Ciclos | Flags |
+|--------|-------------|-------|----------------------------------------------|--------|-------|
+| `0x60` | `PUSH A`    | 1     | SP−=2; M[SP+1]:M[SP] ← 0x00:A               | 4      | —     |
+| `0x61` | `PUSH B`    | 1     | SP−=2; M[SP+1]:M[SP] ← 0x00:B               | 4      | —     |
+| `0x62` | `PUSH F`    | 1     | SP−=2; M[SP+1]:M[SP] ← 0x00:F               | 4      | —     |
+| `0x63` | `PUSH A:B`  | 1     | SP−=2; M[SP+1]:M[SP] ← A:B                  | 4      | —     |
+| `0x64` | `POP A`     | 1     | A ← M[SP]; SP+=2                             | 4      | Z     |
+| `0x65` | `POP B`     | 1     | B ← M[SP]; SP+=2                             | 4      | —     |
+| `0x66` | `POP F`     | 1     | F ← M[SP]; SP+=2                             | 4      | todos |
+| `0x67` | `POP A:B`   | 1     | A:B ← M[SP+1]:M[SP]; SP+=2                  | 4      | —     |
+
+> **Nota de compatibilidad:** Los opcodes anteriores `0x63`–`0x65` (POP A,
+> POP B, POP F) se reubican en `0x64`–`0x66`. `0x63` pasa a `PUSH A:B`,
+> nuevo. Se inserta `POP A:B` en `0x67`.
 
 ---
 
 ### 7.4 Saltos y Llamadas
 
-| Opcode | Mnemónico       | Bytes | Operación                                        | Flags |
-|--------|-----------------|-------|--------------------------------------------------|-------|
-| `0x70` | `JP nn`         | 3     | PC ← nn  *(salto lejano)*                        | —     |
-| `0x71` | `JR rel8`       | 2     | PC ← PC + sign\_ext(rel8)  *(salto relativo ±127)* | —  |
-| `0x72` | `JPN page8`     | 2     | PC ← PC[15:8] : page8  *(misma página)*          | —     |
-| `0x73` | `JP ([nn])`     | 3     | PC ← M[nn+1]:M[nn]  *(salto indirecto)*          | —     |
-| `0x74` | `JP A:B`        | 1     | PC ← A:B  *(salto computado)*                    | —     |
-| `0x75` | `CALL nn`       | 3     | M[SP]←PC\_L; SP−−; M[SP]←PC\_H; SP−−; PC ← nn  | —     |
-| `0x76` | `CALL ([nn])`   | 3     | Igual pero PC ← M[nn+1]:M[nn]                   | —     |
-| `0x77` | `RET`           | 1     | SP++; PC\_H←M[SP]; SP++; PC\_L←M[SP]            | —     |
+| Opcode | Mnemónico       | Bytes | Operación                                                   | Ciclos | Flags |
+|--------|-----------------|-------|-------------------------------------------------------------|--------|-------|
+| `0x70` | `JP nn`         | 3     | PC ← nn  *(salto lejano)*                                   | 6      | —     |
+| `0x71` | `JR rel8`       | 2     | PC ← PC + sign\_ext(rel8)  *(salto relativo ±127)*          | 4/6    | —     |
+| `0x72` | `JPN page8`     | 2     | PC ← PC[15:8] : page8  *(misma página)*                     | 4      | —     |
+| `0x73` | `JP ([nn])`     | 3     | PC ← M[nn+1]:M[nn]  *(salto indirecto)*                     | 8      | —     |
+| `0x74` | `JP A:B`        | 1     | PC ← A:B  *(salto computado)*                               | 2      | —     |
+| `0x75` | `CALL nn`       | 3     | SP−=2; M[SP+1]:M[SP]←PC; PC←nn                             | 8      | —     |
+| `0x76` | `CALL ([nn])`   | 3     | SP−=2; M[SP+1]:M[SP]←PC; PC←M[nn+1]:M[nn]                  | 10     | —     |
+| `0x77` | `RET`           | 1     | PC←M[SP+1]:M[SP]; SP+=2                                     | 6      | —     |
 
 > **`JR rel8` vs `JPN page8`:**
 > `JR` (relativo) es más general: puede alcanzar cualquier página si se
@@ -380,7 +412,7 @@ Todos son **relativos** (`PC ← PC + sign_ext(rel8)`), 2 bytes, no modifican fl
 | Opcode | Mnemónico  | Bytes | Operación                       | Flags modificados |
 |--------|------------|-------|---------------------------------|-------------------|
 | `0xC0` | `NOT A`    | 1     | A ← ~A                          | Z                 |
-| `0xC1` | `NEG A`    | 1     | A ← −A  (= NOT A + 1)            | C H V Z           |
+| `0xC1` | `NEG A`    | 1     | A ← −A  (= NOT A + 1)           | C H V Z           |
 | `0xC2` | `INC A`    | 1     | A ← A + 1                       | C H V Z           |
 | `0xC3` | `DEC A`    | 1     | A ← A − 1                       | C H V Z           |
 | `0xC4` | `INC B`    | 1     | B ← B + 1                       | —                 |
@@ -402,28 +434,84 @@ Todos son **relativos** (`PC ← PC + sign_ext(rel8)`), 2 bytes, no modifican fl
 
 ---
 
+### 7.10 Instrucciones de E/S — IN / OUT
+
+Acceden **exclusivamente** al espacio I/O de 256 puertos (§4.2); nunca al mapa de
+memoria. El bus I/O tiene su propia señal de selección (`IO_SEL`) independiente de
+`MEM_SEL`.
+
+| Opcode | Mnemónico      | Bytes | Operación        | Ciclos | Flags |
+|--------|----------------|-------|------------------|--------|-------|
+| `0xD0` | `IN  A, #n`    | 2     | A ← IOspace[n]   | 4      | Z     |
+| `0xD1` | `IN  A, [B]`   | 1     | A ← IOspace[B]   | 2      | Z     |
+| `0xD2` | `OUT #n, A`    | 2     | IOspace[n] ← A   | 4      | —     |
+| `0xD3` | `OUT [B], A`   | 1     | IOspace[B] ← A   | 2      | —     |
+
+> **Ciclos (con PFQ activo):**
+>
+> - Variante `#n` (inmediato): byte de puerto ya en PFQ + 1 ciclo bus I/O + 1 decode/write = **4 ciclos.**
+> - Variante `[B]` (indirecta): puerto en B → 1 ciclo bus I/O + 1 write = **2 ciclos.**
+>
+> **Flag Z:** solo `IN` actualiza Z según el dato leído (encuesta de FIFO, etc.). `OUT` nunca modifica flags.
+
+---
+
+### 7.11 Instrucciones de 16 bits — ADD16 / SUB16
+
+Operan sobre el par **A:B** como entero de 16 bits (A = byte alto, B = byte bajo).
+Reutilizan el **sumador EA de 16 bits** (§10.2) como ALU de 16 bits; la ALU de 8 bits
+**no** interviene. Ideadas para aritmética de punteros.
+
+| Opcode | Mnemónico    | Bytes | Operación                           | Ciclos | Flags |
+|--------|--------------|-------|-------------------------------------|--------|-------|
+| `0xE0` | `ADD16 #n`   | 2     | A:B ← A:B + sign\_ext(n, 16)        | 4      | C V Z |
+| `0xE1` | `ADD16 #nn`  | 3     | A:B ← A:B + nn                      | 6      | C V Z |
+| `0xE2` | `SUB16 #n`   | 2     | A:B ← A:B − sign\_ext(n, 16)        | 4      | C V Z |
+| `0xE3` | `SUB16 #nn`  | 3     | A:B ← A:B − nn                      | 6      | C V Z |
+
+> **Flags:**
+>
+> - **C** = carry/borrow de bit 15. En SUB16 usa la convención *no-borrow* (C=1 → A:B ≥ operando).
+> - **V** = overflow signed de 16 bits.
+> - **Z** = 1 si el resultado A:B = `0x0000`.
+> - G y E no se actualizan (no hay CMP16).
+>
+> **Ciclos con PFQ activo:**
+>
+> - `#n` (2 bytes): opcode + imm8 en PFQ → sign-extend a 16 b + suma EA + write A:B = **4 ciclos**.
+> - `#nn` (3 bytes): opcode + imm\_lo en PFQ; imm\_hi se lee el siguiente ciclo solapado = **6 ciclos**.
+>
+> **Nota de diseño:** el resultado escribe los 8 bits altos en A y los 8 bits bajos en B.
+> B pierde su rol de índice y A su rol de acumulador durante la instrucción; ambos
+> registros quedan con el nuevo puntero al terminar.
+
+---
+
 ## 8. Tabla de Efectos sobre los Flags
 
 ```
-           C  H  V  Z  G  E  R  L
-ADD/ADC  [ *  *  *  *  *  *  -  - ]
-SUB/SBB  [ *  *  *  *  *  *  -  - ]
-CMP      [ *  *  *  *  *  *  -  - ]
-AND/OR/XOR [-  -  -  *  *  *  -  - ]
-NOT      [ -  -  -  *  -  -  -  - ]
-NEG      [ *  *  *  *  -  -  -  - ]
-INC/DEC  [ *  *  *  *  -  -  -  - ]
-INCB/DECB[ *  *  *  *  -  -  -  - ]   (resultado en ACC; UC lo ruta a B)
-LSL/ASL  [ -  -  */- *  -  -  -  * ]   (ASL activa V)
-LSR/ASR  [ -  -  -  *  -  -  *  - ]
-ROL      [ *  -  -  *  -  -  -  - ]
-ROR      [ *  -  -  *  -  -  -  - ]
-MUL/MUH  [ *  -  -  *  *  *  -  - ]   (C=1 si parte alta ≠ 0)
-LD/ST/MOV[ -  -  -  */- -  -  -  - ]   (Z solo en LD A)
-PUSH/POP [ -  -  -  */- -  -  -  - ]   (Z solo en POP A)
-CALL/RET [ -  -  -  -  -  -  -  - ]
-Saltos   [ -  -  -  -  -  -  -  - ]
-SEC/CLC  [ *  -  -  -  -  -  -  - ]
+             C  H  V  Z  G  E  R  L
+ADD/ADC    [ *  *  *  *  *  *  -  -  ]
+SUB/SBB    [ *  *  *  *  *  *  -  -  ]
+CMP        [ *  *  *  *  *  *  -  -  ]
+AND/OR/XOR [ -  -  -  *  *  *  -  -  ]
+NOT        [ -  -  -  *  -  -  -  -  ]
+NEG        [ *  *  *  *  -  -  -  -  ]
+INC/DEC    [ *  *  *  *  -  -  -  -  ]
+INCB/DECB  [ *  *  *  *  -  -  -  -  ]   (resultado en ACC; UC lo ruta a B)
+LSL/ASL    [ -  -  */- *  -  -  -  * ]   (ASL activa V)
+LSR/ASR    [ -  -  -  *  -  -  *  -  ]
+ROL        [ *  -  -  *  -  -  -  -  ]
+ROR        [ *  -  -  *  -  -  -  -  ]
+MUL/MUH    [ *  -  -  *  *  *  -  -  ]   (C=1 si parte alta ≠ 0)
+LD/ST/MOV  [ -  -  -  */- -  -  -  - ]   (Z solo en LD A)
+PUSH/POP   [ -  -  -  */- -  -  -  - ]   (Z solo en POP A)
+CALL/RET   [ -  -  -  -  -  -  -  -  ]
+Saltos     [ -  -  -  -  -  -  -  -  ]
+SEC/CLC    [ *  -  -  -  -  -  -  -  ]
+IN         [ -  -  -  *  -  -  -  -  ]   (Z según byte leído del espacio I/O)
+OUT        [ -  -  -  -  -  -  -  -  ]
+ADD16/SUB16[ *  -  *  *  -  -  -  -  ]   (C/V/Z de 16 bits; Z si A:B=0x0000)
 
 *  = modificado según el resultado
 -  = no modificado
@@ -454,8 +542,10 @@ SEC/CLC  [ *  -  -  -  -  -  -  - ]
 Ax ADD# ADC# SUB# SBB# AND#  OR# XOR# CMP#  ---  ---  ---  ---  ---  ---  ---  ---
 Bx ADD[] ADD[nn] SUB[] SUB[nn] AND[] OR[] XOR[] CMP[] ADD[nn+B] SUB[nn+B] AND[nn+B] OR[nn+B] XOR[nn+B] CMP[nn+B]  ---  ---
 Cx  NOT  NEG  INC  DEC INCB DECB  CLR  SET  LSL  LSR  ASL  ASR  ROL  ROR SWAP  ---
-Dx  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  (IN/OUT — por asignar)
-Ex  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
+Dx IN#  IN[] OUT# OUT[]  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
+    #n   [B]  #n   [B]
+Ex ADD16# ADD16## SUB16# SUB16##  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
+      #n   #nn     #n    #nn
 Fx  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
 ```
 
@@ -463,29 +553,157 @@ Los opcodes marcados con `---` están **reservados** para extensiones futuras.
 
 ---
 
-## 10. Ciclos de Bus (estimación de micro-operaciones)
+## 10. Micro-Arquitectura — Unidades Hardware
 
-| Instrucción       | Ciclos mínimos | Descripción                                              |
-|-------------------|----------------|----------------------------------------------------------|
-| NOP, HALT         | 4              | 2 fetch + 2 decode/execute                               |
-| 1-byte ALU        | 4              | 2 fetch + 2 execute (ALU combinacional)                  |
-| `LD A, #n`        | 6              | 2 fetch opcode + 2 fetch imm8 + 2 write A                |
-| `LD A, [n]`       | 8              | 2 fetch op + 2 fetch addr + 2 mem read + 2 write A       |
-| `LD A, [nn]`      | 10             | 2 fetch op + 2×2 fetch addr16 + 2 mem read + 2 write A  |
-| `LD A, [nn+B]`    | 12             | igual que [nn] + 2 ciclos suma de índice                 |
-| `ST A, [nn]`      | 10             | similar a LD                                             |
-| `CALL nn`         | 14             | fetch(2) + fetch addr16(4) + push PCH(4) + push PCL(4)  |
-| `RET`             | 10             | fetch(2) + pop PCL(4) + pop PCH(4)                       |
-| `RTI`             | 12             | fetch(2) + pop F(4) + pop PCL(4) + pop PCH(4) + SEI     |
-| `BEQ rel8`        | 6 / 8          | 6 sin salto, 8 con salto (actualizar PC)                 |
-| `JP nn`           | 10             | 2 fetch + 4 fetch addr16 + 4 load PC                     |
+### 10.1 Cola de Prefetch (PFQ — 2 bytes)
 
-> Estos valores son orientativos. La microarquitectura final determinará los
-> ciclos exactos según el diseño de la Unidad de Control.
+```
+  ┌─────────┬─────────┬───────┐
+  │ PFQ[0]  │ PFQ[1]  │ valid │   ← 2 bytes + 2 bits de validez
+  └────┬────┴────┬────┴───────┘
+       │         │
+  opcode      operando8  (o addr_low del operando de 16 bits)
+```
+
+La UC rellena la cola en ciclos de bus libres. Al decodificar:
+
+- **Instrucción de 1 byte**: consume PFQ[0]; adelanta PFQ[1]→PFQ[0] y lanza
+  fetch del siguiente byte.
+- **Instrucción de 2 bytes**: consume PFQ[0] + PFQ[1]; lanza dos nuevos
+  fetches.
+- **Instrucción de 3 bytes**: consume PFQ[0] + PFQ[1]; el tercer byte
+  (addr_high) se lee en el ciclo siguiente solapado con el inicio de
+  ejecución.
+- **Salto tomado**: la cola se vacía (flush) y los dos slots se marcan
+  inválidos; el fetch retoma desde la nueva dirección.
+
+**Ganancia típica**: −2 ciclos en todas las instrucciones de 2+ bytes.
 
 ---
 
-## 11. Ejemplos de Código
+### 10.2 Sumador EA de 16 bits (unidad de cálculo de dirección efectiva)
+
+Unidad dedicada, independiente de la ALU de datos:
+
+```
+  base[15:0]  ←  TMP_H:TMP_L  (dirección base de la instrucción)
+  + index[7:0] ←  0x00:B        (B extendido a cero en el byte alto)
+  ─────────────────────────────
+  EAR[15:0]   →  bus de direcciones
+```
+
+- La suma empieza en paralelo con la fase de fetch del segundo byte de
+  dirección: cuando addr_high llega, el propagate carry del byte bajo ya
+  está resuelto → latencia total = 1 ciclo extra (en lugar de 2).
+- Para modos sin indexado (`[n]`, `[nn]`) el sumador pasa la dirección base
+  directamente (index = 0).
+- Para página cero el byte alto de base es siempre `0x00`; la suma se
+  reduce a 8 bits y puede hacerse en la mitad del ciclo.
+
+**Ganancia**: `LD A, [nn+B]` pasa de 12 → 8 ciclos.
+
+---
+
+### 10.3 Stack de 16 bits con SP alineado a par
+
+El bus interno del stack es de **16 bits**: PUSH y POP transfieren dos bytes
+en un solo ciclo de acceso. Esto requiere que la SRAM de datos exponga un
+puerto de 16 bits (o bien que el stack use su propio banco de 16 bits).
+
+**Regla de alineación:** SP es **siempre par**. La UC fuerza el bit 0 de SP
+a `0` en la inicialización y en cualquier instrucción que lo modifique
+directamente (`LD SP, #nn`, `LD SP, A:B`). Si el programador intenta cargar
+un SP impar, el bit 0 se fuerza a 0 silenciosamente; esto se documenta como
+comportamiento definido.
+
+```
+  PUSH word  →  SP ← SP − 2; M[SP+1]:M[SP] ← word_high:word_low
+  POP  word  →  word ← M[SP+1]:M[SP]; SP ← SP + 2
+```
+
+SP inicial de reset: `0xFFFE`.
+
+**Ganancia**:
+
+- `CALL nn`    : 14 → 8 ciclos
+- `RET`        : 10 → 6 ciclos
+- `RTI`        : 12 → 8 ciclos
+
+---
+
+### 10.4 SRAM Rápida (Nexys 7 100T — Artix-7 XC7A100T)
+
+La placa Nexys 7 100T incorpora **4 MB de SRAM asíncrona IS61WV102416BLL**
+(ciclo de 10 ns typ). A la frecuencia de reloj objetivo de **450 MHz** (≈ 2.2 ns
+por ciclo), la SRAM externa necesita ⌈ 10 ns / 2.2 ns ⌉ = **5 ciclos totales** (4 wait
+states). El controlador de bus mantiene `CS#` activo durante los ciclos de espera y
+muestrea los datos en el 5.º ciclo.
+
+Además la FPGA dispone de **BlockRAM** (RAMB36/RAMB18) con latencia de
+1 ciclo síncrono, ideal para:
+
+| Uso propuesto              | Recurso              | Latencia    |
+|----------------------------|----------------------|-------------|
+| Página cero (256 B)        | RAMB18 ×1            | 1 ciclo     |
+| Stack interno (2 KB)       | RAMB18 ×1            | 1 ciclo     |
+| Memoria de programa (ROM)  | RAMB36 ×N            | 1 ciclo     |
+| Memoria de datos general   | SRAM IS61WV102416BLL | 5 ciclos (4 wait states @ 450 MHz) |
+
+Con página cero y stack en BlockRAM, los accesos más frecuentes (variables
+locales, paso de parámetros) tienen latencia de **1 ciclo**.
+
+---
+
+## 11. Ciclos de Bus — Estimación Revisada
+
+Bases del modelo: prefetch de 2 bytes activo, sumador EA solapado, PUSH/POP
+de 16 bits, página cero y stack en BRAM (1 ciclo), memoria general en SRAM
+external 10 ns a 50 MHz (1 ciclo de acceso).
+
+| Instrucción        | Sin optim. | **Con optim.** | Δ  | Descripción resumida                                      |
+|--------------------|------------|----------------|----|-----------------------------------------------------------|
+| NOP / HALT         | 4          | **2**          | −2 | Opcode ya en PFQ; decode+execute en 2                     |
+| 1-byte ALU (reg)   | 4          | **2**          | −2 | PFQ tiene el opcode; ALU combinacional                    |
+| `LD A, #n`         | 6          | **2**          | −4 | Opcode + imm8 ya en PFQ; solo write A                     |
+| `LD A, B`          | 4          | **2**          | −2 | 1 byte en PFQ                                             |
+| `LD A, [n]`        | 8          | **4**          | −4 | Opcode+addr en PFQ; read pág-cero BRAM 1 ciclo + write A  |
+| `ST A, [n]`        | 8          | **4**          | −4 | Igual; write BRAM 1 ciclo                                 |
+| `LD A, [nn]`       | 10         | **6**          | −4 | PFQ da op+addr_low; addr_high 1 ciclo; mem 1 ciclo; wA    |
+| `ST A, [nn]`       | 10         | **6**          | −4 | Ídem                                                      |
+| `LD A, [nn+B]`     | 12         | **6**          | −6 | PFQ + EA solapada; mem 1 ciclo; write A                   |
+| `ST A, [nn+B]`     | 12         | **6**          | −6 | Ídem                                                      |
+| `ADD #n`           | 6          | **2**          | −4 | Opcode+imm8 en PFQ; ALU comb; write A                     |
+| `ADD [n]`          | 10         | **4**          | −6 | PFQ; BRAM pág-cero; ALU; write A                          |
+| `ADD [nn+B]`       | 14         | **8**          | −6 | PFQ + EA solapada; mem; ALU; write A                      |
+| `JP nn`            | 10         | **6**          | −4 | PFQ da op+addr_low; addr_high 1c; PC load; flush PFQ      |
+| `JR rel8`          | 6/8        | **2/4**        | −4 | PFQ; no-salto=2, salto=4 (flush+fetch)                    |
+| `JP A:B`           | 4          | **2**          | −2 | 1-byte; PC←A:B; flush                                     |
+| `CALL nn`          | 14         | **8**          | −6 | PFQ; fetch addr_high; SP−2; push PC(16b); PC←nn           |
+| `CALL ([nn])`      | 18         | **10**         | −8 | CALL + lectura indirecta de destino                        |
+| `RET`              | 10         | **6**          | −4 | PFQ; pop PC(16b) BRAM; SP+2; flush                        |
+| `RTI`              | 12         | **8**          | −4 | pop F(16b), pop PC(16b), SP+4; I←1; flush                 |
+| `PUSH A`           | 6          | **4**          | −2 | SP−2; write 16b BRAM                                      |
+| `POP A`            | 6          | **4**          | −2 | read 16b BRAM; SP+2; write A                              |
+| `PUSH A:B`         | 6          | **4**          | —  | SP−2; write 16b BRAM (A=high, B=low)                      |
+| `POP A:B`          | 6          | **4**          | —  | read 16b BRAM; SP+2; A←high, B←low                       |
+| `BEQ rel8`         | 6/8        | **2/4**        | −4 | Igual que JR (misma lógica)                               |
+| `IN A, #n`         | 6          | **4**          | −2 | PFQ; fetch puerto + ciclo I/O                             |
+| `IN A, [B]`        | 4          | **2**          | −2 | Puerto en B; sólo ciclo I/O + write A                    |
+| `OUT #n, A`        | 6          | **4**          | −2 | PFQ; fetch puerto + ciclo I/O                             |
+| `OUT [B], A`       | 4          | **2**          | −2 | Puerto en B; sólo ciclo I/O                              |
+| `ADD16 #n`         | —          | **4**          |  — | EA adder 16 b; sign-ext imm8; write A:B                   |
+| `ADD16 #nn`        | —          | **6**          |  — | EA adder 16 b; fetch imm16 solapado; write A:B            |
+| `SUB16 #n`         | —          | **4**          |  — | Ídem ADD16 #n (sumador en modo resta)                     |
+| `SUB16 #nn`        | —          | **6**          |  — | Ídem ADD16 #nn                                            |
+
+> Ciclos expresados en **ciclos de reloj** (1 ciclo = 1 período). Modelo de
+> referencia: **450 MHz** (MMCM/PLL Artix-7), BRAM 1 ciclo, SRAM externa
+> IS61WV102416BLL 5 ciclos (4 wait states). El bus I/O añade 1 ciclo de
+> latencia adicional sobre un acceso de registro.
+
+---
+
+## 12. Ejemplos de Código
 
 ### Suma de dos valores en memoria
 
@@ -519,15 +737,14 @@ loop:
 ### ISR mínima (rutina de servicio de interrupción)
 
 ```asm
-    ; Al entrar, la UC ha hecho push automático de PCH, PCL, F; I←0
+    ; Al entrar, la UC ha hecho push automático de F (16b) y PC (16b); I←0
+    ; SP ha bajado 4 bytes (2 × PUSH de 16 bits, alineado a par)
 isr:
-    PUSH A            ; salvar A
-    PUSH B            ; salvar B
+    PUSH A:B          ; salvar A y B en un solo ciclo de stack (4 ciclos)
     ; ... cuerpo de la ISR ...
     OUT  0x31, A      ; limpiar flag en IFR (escribir 1 en el bit)
-    POP  B
-    POP  A
-    RTI               ; restaura F, PC; I←1
+    POP  A:B          ; restaurar A y B
+    RTI               ; pop F (16b), pop PC (16b); SP+=4; I←1
 ```
 
 ### Llamada a subrutina
@@ -545,136 +762,43 @@ isr:
     RET
 ```
 
+### Aritmética de punteros con ADD16
+
+```asm
+    ; A:B apunta a la base de un array de structs de 4 bytes (base = 0x2000)
+    LD   A, #0x20
+    LD   B, #0x00
+    ADD16 #4          ; A:B ← 0x2004  (struct[1])  — #n, 4 ciclos
+    ADD16 #4          ; A:B ← 0x2008  (struct[2])
+    ADD16 #0x01F8     ; A:B ← 0x2200  (salto de bloque > 127 — #nn, 6 ciclos)
+    JP   A:B          ; salto computado a la dirección calculada
+```
+
 ---
 
-## 12. Decisiones de Diseño
+## 13. Decisiones de Diseño
 
 ### Resueltas
 
 - [x] **NEG A**: implementado en ALU (opcode ALU `0x10`, instrucción `0xC1`).
 - [x] **INC B / DEC B**: implementados en ALU (opcodes ALU `0x1A`/`0x1B`, instrucciones `0xC4`/`0xC5`).
 - [x] **Modos indexados**: `LD A, [nn+B]` / `ST A, [nn+B]` y variantes implementados.
-- [x] **E/S separada**: decidido espacio I/O de 256 puertos independiente del mapa de memoria; instrucciones `IN`/`OUT` (opcodes Dx — por asignar).
+- [x] **E/S separada**: espacio I/O de 256 puertos independiente del mapa de memoria; instrucciones `IN`/`OUT` (opcodes `0xD0`–`0xD3` — ver §7.10).
 - [x] **Interrupciones**: vector IRQ `0xFFFE:0xFFFF`, vector NMI `0xFFFA:0xFFFB`; flag I (flip-flop interno); `SEI`/`CLI`/`RTI`; IMR/IFR en puertos `0x30`/`0x31`.
-- [x] **RTI**: opcode `0x06`; restaura F, PC e I.
+- [x] **RTI**: opcode `0x06`; restaura F y PC con PUSH/POP de 16 bits.
+- [x] **Cola de prefetch de 2 bytes (PFQ)**: reduce en −2 a −4 ciclos todas las instrucciones de 2+ bytes. Flush en salto tomado.
+- [x] **Sumador EA de 16 bits dedicado**: cálculo de dirección efectiva solapado con el último fetch de la dirección base. Latencia del modo `[nn+B]`: 6 ciclos (antes 12).
+- [x] **PUSH/POP de 16 bits**: bus interno de stack de 16 bits; un solo ciclo de acceso por operación. `CALL` baja a 8 ciclos, `RET` a 6, `RTI` a 8.
+- [x] **SP alineado a par**: SP se decrementa/incrementa siempre en 2; bit 0 forzado a `0` en reset y en `LD SP`. SP inicial = `0xFFFE`.
+- [x] **Plataforma Nexys 7 100T**: Stack y página cero en BlockRAM (1 ciclo); memoria de programa en BRAM; memoria de datos general en SRAM externa IS61WV102416BLL (1 ciclo a 50 MHz, 1+1 wait a 100 MHz).
+- [x] **PUSH A:B / POP A:B**: instrucciones nuevas (opcodes `0x63`/`0x67`) para salvar/restaurar el par en un solo ciclo de stack.
+- [x] **Frecuencia de reloj**: 450 MHz mediante MMCM/PLL interno del Artix-7. SRAM IS61WV102416BLL necesita 4 wait states (5 ciclos totales). BRAM sigue con latencia de 1 ciclo.
+- [x] **Segundo canal UART (UART1)**: puertos `0x05`–`0x09` (espejo funcional de UART0). `0x0A`–`0x0F` reservados. IMR bit `[3]` habilitado para UART1.
+- [x] **Acceso atómico a contadores de 32 bits**: leer `TMRx_CNT0` captura los 32 bits en un registro sombra; CNT1–3 retornan el valor del snapshot. Evita race condition sin necesidad de detener el timer.
+- [x] **Instrucciones IN/OUT**: opcodes `0xD0`–`0xD3` asignados. `IN A, #n` (2 B, 4 ciclos), `IN A, [B]` (1 B, 2 ciclos), `OUT #n, A` (2 B, 4 ciclos), `OUT [B], A` (1 B, 2 ciclos). Descritas en §7.10.
+- [x] **Unidad de Control**: primera implementación basada en **microcode** (ROM de microinstrucciones). La opción hardwired queda como optimización futura opcional.
+- [x] **Instrucciones 16 bits (ADD16/SUB16)**: opcodes `0xE0`–`0xE3`; aritmética de punteros sobre A:B reutilizando el sumador EA. `#n` sign-extendido (4 ciclos), `#nn` literal (6 ciclos). Flags C, V, Z de 16 bits. Ver §7.11.
 
 ### Pendientes
 
-- [ ] **Instrucciones IN/OUT**: asignar opcodes en rango `0xDx`; definir `IN A, #n` / `IN A, [B]` / `OUT #n, A` / `OUT [B], A`.
-- [ ] **Instrucciones de 16 bits sobre A:B**: suma/resta de 16 bits tratando A:B como par (útil para aritmética de punteros).
-- [ ] **Wait states**: protocolo de bus para memoria lenta.
-- [ ] **Ciclos de reloj exactos por instrucción**: afinar cuando se diseñe la Unidad de Control.
-- [ ] **Segundo canal UART**: puertos `0x05`–`0x0F` reservados.
-- [ ] **Acceso atómico a contadores de 32 bits**: latch de snapshot al leer TMR_CNT0 para evitar race condition entre bytes.
-7x   JP   JR  JPN JP()  JP   CALL CALL  RET  ---  ---  ---  ---  ---  ---  ---  ---
-       nn  r8   p8  [nn] A:B   nn  [nn]
-8x  BEQ  BNE  BCS  BCC  BVS  BVC  BGT  BLE  BGE  BLT  BHC BEQ2  ---  ---  ---  ---
-9x  ADD  ADC  SUB  SBB  AND   OR  XOR  CMP  MUL  MUH  ---  ---  ---  ---  ---  ---
-Ax ADD# ADC# SUB# SBB# AND#  OR# XOR# CMP#  ---  ---  ---  ---  ---  ---  ---  ---
-Bx ADD[] ADD[nn] SUB[] SUB[nn] AND[] OR[] XOR[] CMP[]  ---  ---  ---  ---  ---  ---  ---  ---
-Cx  NOT  NEG  INC  DEC INCB DECB  CLR  SET  LSL  LSR  ASL  ASR  ROL  ROR SWAP  ---
-Dx  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
-Ex  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
-Fx  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
-
-```
-
-Los opcodes marcados con `---` están **reservados** para extensiones futuras
-(instrucciones de E/S, multiplicación de 16 bits, etc.).
-
----
-
-## 10. Ciclos de Bus (estimación de micro-operaciones)
-
-| Instrucción       | Ciclos mínimos | Descripción                                              |
-|-------------------|----------------|----------------------------------------------------------|
-| NOP, HALT         | 4              | 2 fetch + 2 decode/execute                               |
-| 1-byte ALU        | 4              | 2 fetch + 2 execute (ALU combinacional)                  |
-| `LD A, #n`        | 6              | 2 fetch opcode + 2 fetch imm8 + 2 write A                |
-| `LD A, [n]`       | 8              | 2 fetch op + 2 fetch addr + 2 mem read + 2 write A       |
-| `LD A, [nn]`      | 10             | 2 fetch op + 2×2 fetch addr16 + 2 mem read + 2 write A   |
-| `ST A, [nn]`      | 10             | similar a LD                                             |
-| `CALL nn`         | 14             | fetch(2) + fetch addr16(4) + push PCH(4) + push PCL(4)   |
-| `RET`             | 10             | fetch(2) + pop PCL(4) + pop PCH(4)                       |
-| `BEQ rel8`        | 6 / 8          | 6 sin salto, 8 con salto (actualizar PC)                 |
-| `JP nn`           | 10             | 2 fetch + 4 fetch addr16 + 4 load PC                     |
-
-> Estos valores son orientativos. La microarquitectura final determinará los
-> ciclos exactos según el diseño de la Unidad de Control.
-
----
-
-## 11. Ejemplos de Código
-
-### Suma de dos valores en memoria
-
-```asm
-    LD  A, [0x10]     ; A ← M[0x0010]
-    LD  B, [0x11]     ; B ← M[0x0011]
-    ADD               ; A ← A + B
-    ST  A, [0x12]     ; M[0x0012] ← A
-```
-
-### Bucle: suma un array de 8 elementos (long. en 0x00, datos en 0x01..0x08)
-
-```asm
-    LD  A, #0x00      ; acumulador de suma = 0
-    LD  B, [0x00]     ; B = contador = n
-loop:
-    CMP #0            ; ¿B == 0?
-    BEQ done          ; si Z=1, fin
-    ADD [B]           ; A ← A + M[B]  (página cero vía B)
-    LD  B, B          ; no existe autodecrement; cargamos B para DEC
-    ; Necesitamos guardar A temporalmente para usar DEC B:
-    PUSH A
-    LD  A, B
-    DEC A
-    LD  B, A
-    POP  A
-    JR  loop
-done:
-    ST  A, [0x09]
-```
-
-> Este ejemplo muestra una limitación del ISA: no hay instrucción
-> `DEC B` que preserve A. Se propone añadir `DEC B` (opcode `0xC5`) para
-> evitar el push/pop. ✓ (ya está incluido en la sección 7.9)
-
-### Llamada a subrutina
-
-```asm
-    LD  A, #42
-    LD  B, #7
-    CALL 0x0200       ; salta a subrutina en 0x0200
-    ST   A, [0x50]    ; guarda resultado
-    HALT
-
-; Subrutina en 0x0200: A ← A * B (los 8 bits bajos)
-0x0200:
-    MUL               ; A ← (A × B)[7:0]
-    RET
-```
-
-### Salto relativo vs salto lejano
-
-```asm
-    CMP #100
-    BLT  near_target  ; salto relativo ±127 bytes si A < 100
-
-    ; Si el destino está fuera de ±127 bytes:
-    BGE  skip
-    JP   far_target   ; salto lejano (3 bytes) si A < 100
-skip:
-```
-
----
-
-## 12. Decisiones de Diseño Pendientes
-
-- [ ] **Interrupciones**: definir vector de IRQ en `0xFFFE:0xFFFF` y comportamiento de `SEI`/`CLI`.
-- [ ] **Modos indexados**: `LD A, [nn + B]` (B como índice) — muy útil para arrays; requiere hardware de suma en la fase de cálculo de dirección.
-- [ ] **NEG A**: implementar en ALU o en microcode como NOT+INC.
-- [ ] **E/S mapeada en memoria vs puertos separados**: `IN`/`OUT` con espacio de direcciones independiente (como Z80) o usar `LD`/`ST` con rango reservado.
-- [ ] **Instrucciones de 16 bits sobre A:B**: operaciones de 16 bits tratando A:B como par (útil para aritmética de punteros).
-- [ ] **Wait states**: protocolo de bus para memoria lenta.
-- [ ] **Ciclos de reloj exactos por instrucción**: afina cuando se diseñe la UC.
+- [ ] **Implementación microcode**: pendiente de ISA estable (ya cubierta) **y** diseño del *datapath* (señales de control, ancho de la palabra de microinstrucción, secuenciador de estados). No puede comenzar hasta tener el datapath VHDL esbozado. Después: codificar PFQ flush, solapamiento EA, wait states BRAM/SRAM.
