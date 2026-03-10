@@ -1,7 +1,8 @@
 # ISA — Arquitectura del Conjunto de Instrucciones
+
 ## Procesador de 8 bits con bus de direcciones de 16 bits
 
-> Estado: **borrador v0.1** — sujeto a revisión antes de implementar la Unidad de Control.
+> **Estado: borrador v0.2** — ALU extendida (NEG, INCB, DECB); modos indexados; I/O independiente; modelo de interrupciones.
 
 ---
 
@@ -39,7 +40,9 @@ secundario o registro auxiliar.
 
 ---
 
-## 3. Registro de Flags (F)
+## 3. Registro de Flags (F) y flag de Interrupción (I)
+
+### 3.1 Registro F (8 bits)
 
 | Bit | Símbolo | Nombre           | Descripción                                           |
 |-----|---------|------------------|-------------------------------------------------------|
@@ -51,6 +54,19 @@ secundario o registro auxiliar.
 |  2  | **E**   | Equal            | A = B (comparación bit a bit de los operandos de entrada).  |
 |  1  | **R**   | Bit desplazado → | Bit 0 desplazado fuera en LSR/ASR.                    |
 |  0  | **L**   | Bit desplazado ← | Bit 7 desplazado fuera en LSL/ASL.                    |
+
+### 3.2 Flag de Interrupción I (flip-flop interno)
+
+**I** es un biestable interno a la UC, **no** forma parte de F ni se guarda con `PUSH F`.
+
+| Instrucción | Efecto sobre I    |
+|-------------|-------------------|
+| `SEI`       | I ← 1 (habilita)  |
+| `CLI`       | I ← 0 (deshabilita)|
+| Entrada IRQ | I ← 0 (auto)      |
+| `RTI`       | I ← 1 (auto)      |
+
+El IMR de I/O (puerto `0x30`) permite máscara individual de fuentes; I actúa como habilitación global.
 
 ### Convención de signo en resta
 
@@ -64,19 +80,64 @@ C = 0  →  hubo préstamo →  A < B
 
 ---
 
-## 4. Mapa de Memoria (referencia)
+## 4. Mapa de Memoria y Espacio I/O
+
+### 4.1 Mapa de Memoria (64 KB)
 
 ```
-0x0000 – 0x00FF   Página cero       (acceso rápido con dirección de 8 bits)
-0x0100 – 0x01FF   (disponible)
-  ...
-0xFEFF – 0xFEFF   (disponible)
-0xFF00 – 0xFFFD   (disponible / I-O mapeado en memoria — por definir)
-0xFFFE – 0xFFFF   Vector de IRQ     (por definir — interrupciones futuras)
+0x0000 – 0x00FF   Página cero       (acceso rápido, 1 byte de dirección)
+0x0100 – 0xFFF9   Memoria general   (RAM/ROM según sistema)
+0xFFFA – 0xFFFB   Vector de NMI     (Non-Maskable Interrupt, little-endian)
+0xFFFC – 0xFFFD   (reservado)
+0xFFFE – 0xFFFF   Vector de IRQ     (Maskable Interrupt, little-endian)
 ```
 
+> El I/O **no** está mapeado en memoria; se accede con instrucciones `IN`/`OUT`
+> (espacio físico separado — ver §4.2).
+>
 > El stack crece desde `0xFFFF` hacia abajo. SP inicial = `0xFFFF`; el
-> primer PUSH escribe en `0xFFFE`.
+> primer PUSH escribe en `0xFFFE` (¡coincide con vector IRQ si SP no se
+> inicializa antes!). Se recomienda inicializar SP en `0xFFF9` o inferior.
+
+### 4.2 Espacio de I/O (256 puertos, 8-bit independiente)
+
+Acceso exclusivo mediante `IN A, #n` / `OUT #n, A` (o variantes con `[B]`).
+
+| Puerto | Nombre      | R/W | Descripción |
+|--------|-------------|-----|-------------|
+| `0x00` | UART_DATA   | R/W | TX: byte a enviar (W). RX: byte recibido (R). |
+| `0x01` | UART_STAT   |  R  | `[3]` TX busy · `[2]` RX ready · `[1]` TX_IE · `[0]` RX_IE |
+| `0x02` | UART_CTRL   |  W  | `[3]` TX_EN · `[2]` RX_EN · `[1]` TX_IE · `[0]` RX_IE |
+| `0x03` | UART_BAUD_L |  W  | Divisor de baudrate — byte bajo |
+| `0x04` | UART_BAUD_H |  W  | Divisor de baudrate — byte alto |
+| `0x05–0x0F` | —      | —   | Reservados (expansión UART / segundo canal) |
+| `0x10` | TMR0_CNT0   | R/W | Timer 0: contador bits  7:0  |
+| `0x11` | TMR0_CNT1   | R/W | Timer 0: contador bits 15:8  |
+| `0x12` | TMR0_CNT2   | R/W | Timer 0: contador bits 23:16 |
+| `0x13` | TMR0_CNT3   | R/W | Timer 0: contador bits 31:24 |
+| `0x14` | TMR0_RLD0   | R/W | Timer 0: valor de recarga bits  7:0  |
+| `0x15` | TMR0_RLD1   | R/W | Timer 0: valor de recarga bits 15:8  |
+| `0x16` | TMR0_RLD2   | R/W | Timer 0: valor de recarga bits 23:16 |
+| `0x17` | TMR0_RLD3   | R/W | Timer 0: valor de recarga bits 31:24 |
+| `0x18` | TMR0_CTRL   | R/W | `[2]` IRQ_EN · `[1]` auto-reload · `[0]` run/stop |
+| `0x19–0x1F` | —      | —   | Reservados Timer 0 |
+| `0x20` | TMR1_CNT0   | R/W | Timer 1: ídem Timer 0 (offset +0x10) |
+| `0x21` | TMR1_CNT1   | R/W | ↑ |
+| `0x22` | TMR1_CNT2   | R/W | ↑ |
+| `0x23` | TMR1_CNT3   | R/W | ↑ |
+| `0x24` | TMR1_RLD0   | R/W | ↑ |
+| `0x25` | TMR1_RLD1   | R/W | ↑ |
+| `0x26` | TMR1_RLD2   | R/W | ↑ |
+| `0x27` | TMR1_RLD3   | R/W | ↑ |
+| `0x28` | TMR1_CTRL   | R/W | ↑ |
+| `0x29–0x2F` | —      | —   | Reservados Timer 1 |
+| `0x30` | IMR         | R/W | Máscara de interrupciones (1=habilitada) `[2]`TMR1 · `[1]`TMR0 · `[0]`UART |
+| `0x31` | IFR         | R/W | Flags pendientes (read=get, write 1=clear) |
+| `0x32` | IVL         | R/W | Byte bajo del vector IRQ (también en `0xFFFE`) |
+| `0x33` | IVH         | R/W | Byte alto del vector IRQ (también en `0xFFFF`) |
+| `0x34` | NVIL        | R/W | Byte bajo del vector NMI (también en `0xFFFA`) |
+| `0x35` | NVIH        | R/W | Byte alto del vector NMI (también en `0xFFFB`) |
+| `0x36–0xFF` | —      | —   | Disponibles para periféricos futuros |
 
 ---
 
@@ -99,6 +160,8 @@ C = 0  →  hubo préstamo →  A < B
 
 ## 6. Modos de Direccionamiento
 
+### 6.1 Modos existentes
+
 | Símbolo      | Nombre            | Ejemplo            | Bytes | Descripción                                      |
 |--------------|-------------------|--------------------|-------|--------------------------------------------------|
 | `IMP`        | Implícito         | `NOP`              | 1     | Sin operando; el registro queda implícito.        |
@@ -110,6 +173,24 @@ C = 0  →  hubo préstamo →  A < B
 | `rel8`       | Relativo          | `BEQ rel8`         | 2     | `PC ← PC + sign_ext(rel8)`. Rango ±127 bytes.    |
 | `page8`      | Misma página      | `JPN page8`        | 2     | `PC ← PC[15:8] : page8`. Solo cambia byte bajo.  |
 | `([nn])`     | Indirecto absoluto| `JP ([0x1234])`    | 3     | `PC ← M[nn+1]:M[nn]`. Salto indirecto.           |
+
+### 6.2 Modos indexados (nuevos)
+
+| Símbolo      | Nombre                  | Ejemplo              | Bytes | Descripción                                           |
+|--------------|-------------------------|----------------------|-------|-------------------------------------------------------|
+| `[nn+B]`     | Absoluto indexado por B | `LD A, [0x1000+B]`   | 3     | Dirección = `nn + B` (suma sin signo, 16-bit).        |
+| `[n+B]`      | Pág-cero indexado por B | `LD A, [0x10+B]`     | 2     | Dirección = `0x00:n + B`. Envuelve dentro de pág-cero.|
+
+El registro B actúa como índice; su valor **no** se modifica.
+Los 3 bytes de `[nn+B]` son: `opcode`, `addr_low + B` se calcula durante la
+ejecución; el ensamblador emite `addr_low` y `addr_high` del base.
+
+### 6.3 Modo I/O (nuevo)
+
+| Símbolo   | Nombre          | Ejemplo        | Bytes | Descripción                                    |
+|-----------|-----------------|----------------|-------|------------------------------------------------|
+| `io[#n]`  | I/O inmediato   | `IN A, #0x01`  | 2     | Puerto = byte literal. Acceso al espacio I/O.  |
+| `io[B]`   | I/O indirecto B | `IN A, [B]`    | 1     | Puerto = valor de registro B.                  |
 
 ---
 
@@ -123,8 +204,9 @@ C = 0  →  hubo préstamo →  A < B
 | `0x01` | `HALT`     | 1     | Detiene el reloj       | —     |
 | `0x02` | `SEC`      | 1     | C ← 1                  | C     |
 | `0x03` | `CLC`      | 1     | C ← 0                  | C     |
-| `0x04` | `SEI`      | 1     | Habilita interrupciones (futuro) | — |
-| `0x05` | `CLI`      | 1     | Deshabilita interrupciones (futuro) | — |
+| `0x04` | `SEI`      | 1     | I ← 1 (habilita interrupciones enmascarables) | — |
+| `0x05` | `CLI`      | 1     | I ← 0 (deshabilita interrupciones enmascarables) | — |
+| `0x06` | `RTI`      | 1     | SP++; F←M[SP]; SP++; PCL←M[SP]; SP++; PCH←M[SP]; I←1 | todos |
 
 ---
 
@@ -139,6 +221,8 @@ C = 0  →  hubo préstamo →  A < B
 | `0x12` | `LD A, [n]`       | 2     | A ← M[0x00:n]               | Z     |
 | `0x13` | `LD A, [nn]`      | 3     | A ← M[nn]                   | Z     |
 | `0x14` | `LD A, [B]`       | 1     | A ← M[0x00:B]               | Z     |
+| `0x15` | `LD A, [nn+B]`    | 3     | A ← M[nn + B]               | Z     |
+| `0x16` | `LD A, [n+B]`     | 2     | A ← M[0x00:n + B]           | Z     |
 
 #### Carga de B
 
@@ -148,6 +232,8 @@ C = 0  →  hubo préstamo →  A < B
 | `0x21` | `LD B, #n`        | 2     | B ← n                       | —     |
 | `0x22` | `LD B, [n]`       | 2     | B ← M[0x00:n]               | —     |
 | `0x23` | `LD B, [nn]`      | 3     | B ← M[nn]                   | —     |
+| `0x24` | `LD B, [B]`       | 1     | B ← M[0x00:B]               | —     |
+| `0x25` | `LD B, [nn+B]`    | 3     | B ← M[nn + B]               | —     |
 
 #### Almacenamiento
 
@@ -156,8 +242,11 @@ C = 0  →  hubo préstamo →  A < B
 | `0x30` | `ST A, [n]`       | 2     | M[0x00:n] ← A               | —     |
 | `0x31` | `ST A, [nn]`      | 3     | M[nn] ← A                   | —     |
 | `0x32` | `ST A, [B]`       | 1     | M[0x00:B] ← A               | —     |
+| `0x33` | `ST A, [nn+B]`    | 3     | M[nn + B] ← A               | —     |
+| `0x34` | `ST A, [n+B]`     | 2     | M[0x00:n + B] ← A           | —     |
 | `0x40` | `ST B, [n]`       | 2     | M[0x00:n] ← B               | —     |
 | `0x41` | `ST B, [nn]`      | 3     | M[nn] ← B                   | —     |
+| `0x42` | `ST B, [nn+B]`    | 3     | M[nn + B] ← B               | —     |
 
 #### Stack Pointer
 
@@ -236,8 +325,8 @@ Todos son **relativos** (`PC ← PC + sign_ext(rel8)`), 2 bytes, no modifican fl
 | `0x95` | `OR`       | 1     | A ← A OR B              | Z G E              |
 | `0x96` | `XOR`      | 1     | A ← A XOR B             | Z G E              |
 | `0x97` | `CMP`      | 1     | flags ← A − B (A no cambia) | C H V Z G E   |
-| `0x98` | `MUL`      | 1     | A ← (A × B)[7:0]        | C Z G E            |
-| `0x99` | `MUH`      | 1     | A ← (A × B)[15:8]       | C Z G E            |
+| `0x98` | `MUL`      | 1     | A ← [A × B](7:0)        | C Z G E            |
+| `0x99` | `MUH`      | 1     | A ← [A × B](15:8)       | C Z G E            |
 
 ---
 
@@ -260,6 +349,8 @@ Todos son **relativos** (`PC ← PC + sign_ext(rel8)`), 2 bytes, no modifican fl
 
 ### 7.8 Operaciones ALU — Memoria (A op M[...] → A)
 
+#### Modo Página cero / Absoluto
+
 | Opcode | Mnemónico        | Bytes | Operación                | Flags modificados |
 |--------|------------------|-------|--------------------------|-------------------|
 | `0xB0` | `ADD [n]`        | 2     | A ← A + M[0x00:n]        | C H V Z G E       |
@@ -271,14 +362,25 @@ Todos son **relativos** (`PC ← PC + sign_ext(rel8)`), 2 bytes, no modifican fl
 | `0xB6` | `XOR [n]`        | 2     | A ← A XOR M[0x00:n]      | Z G E             |
 | `0xB7` | `CMP [n]`        | 2     | flags ← A − M[0x00:n]    | C H V Z G E       |
 
+#### Modo indexado por B
+
+| Opcode | Mnemónico        | Bytes | Operación                | Flags modificados |
+|--------|------------------|-------|--------------------------|-------------------|
+| `0xB8` | `ADD [nn+B]`     | 3     | A ← A + M[nn+B]          | C H V Z G E       |
+| `0xB9` | `SUB [nn+B]`     | 3     | A ← A − M[nn+B]          | C H V Z G E       |
+| `0xBA` | `AND [nn+B]`     | 3     | A ← A AND M[nn+B]        | Z G E             |
+| `0xBB` | `OR  [nn+B]`     | 3     | A ← A OR  M[nn+B]        | Z G E             |
+| `0xBC` | `XOR [nn+B]`     | 3     | A ← A XOR M[nn+B]        | Z G E             |
+| `0xBD` | `CMP [nn+B]`     | 3     | flags ← A − M[nn+B]      | C H V Z G E       |
+
 ---
 
-### 7.9 Operaciones de Un Operando (sobre A)
+### 7.9 Operaciones de Un Operando (sobre A ó B)
 
 | Opcode | Mnemónico  | Bytes | Operación                       | Flags modificados |
 |--------|------------|-------|---------------------------------|-------------------|
 | `0xC0` | `NOT A`    | 1     | A ← ~A                          | Z                 |
-| `0xC1` | `NEG A`    | 1     | A ← −A  (= NOT A + 1)  †        | C V Z             |
+| `0xC1` | `NEG A`    | 1     | A ← −A  (= NOT A + 1)            | C H V Z           |
 | `0xC2` | `INC A`    | 1     | A ← A + 1                       | C H V Z           |
 | `0xC3` | `DEC A`    | 1     | A ← A − 1                       | C H V Z           |
 | `0xC4` | `INC B`    | 1     | B ← B + 1                       | —                 |
@@ -293,8 +395,10 @@ Todos son **relativos** (`PC ← PC + sign_ext(rel8)`), 2 bytes, no modifican fl
 | `0xCD` | `ROR A`    | 1     | A ← rota der A (a través de C)  | C Z               |
 | `0xCE` | `SWAP A`   | 1     | A ← nibbles intercambiados      | Z                 |
 
-> † `NEG` requiere una extensión de la ALU (NOT + INC interno) o se puede
-> implementar en microcode como dos micro-ops: `NOT A` seguido de `INC A`.
+> `NEG A`, `INC B` y `DEC B` están implementados en `ALU.vhdl`
+> (opcodes ALU `0x10`, `0x1A`, `0x1B` respectivamente).
+> La UC enruta el resultado de `INC B`/`DEC B` hacia el registro B; los
+> flags generados por la ALU se descartan.
 
 ---
 
@@ -381,6 +485,7 @@ Los opcodes marcados con `---` están **reservados** para extensiones futuras
 ## 11. Ejemplos de Código
 
 ### Suma de dos valores en memoria
+
 ```asm
     LD  A, [0x10]     ; A ← M[0x0010]
     LD  B, [0x11]     ; B ← M[0x0011]
@@ -389,6 +494,7 @@ Los opcodes marcados con `---` están **reservados** para extensiones futuras
 ```
 
 ### Bucle: suma un array de 8 elementos (long. en 0x00, datos en 0x01..0x08)
+
 ```asm
     LD  A, #0x00      ; acumulador de suma = 0
     LD  B, [0x00]     ; B = contador = n
@@ -413,6 +519,7 @@ done:
 > evitar el push/pop. ✓ (ya está incluido en la sección 7.9)
 
 ### Llamada a subrutina
+
 ```asm
     LD  A, #42
     LD  B, #7
@@ -427,6 +534,7 @@ done:
 ```
 
 ### Salto relativo vs salto lejano
+
 ```asm
     CMP #100
     BLT  near_target  ; salto relativo ±127 bytes si A < 100

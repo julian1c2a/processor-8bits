@@ -170,6 +170,20 @@ begin
                     v_RegStatus(5) := '1'; -- fV
                 end if;
 
+            when b"10000" => -- NEG (Two's Complement Negate: 0 - A)
+                -- Half-borrow del nibble bajo: 0 - nibbleA
+                nibble_res := unsigned'("00000") - nibbleA_ext;
+                v_RegStatus(6) := not nibble_res(4); -- fH (borrow convention igual que SUB)
+
+                -- Resta principal 9 bits: 0 - sign_ext(A)
+                acc_ext := signed("000000000") - resize(signed(RegInA), 9);
+                v_RegStatus(7) := not acc_ext(8); -- fC: NOT borrow (C=1 sólo si A=0x00)
+
+                -- Overflow: único caso es A=0x80 (-128); negarlo daría +128 (no cabe en signed 8-bit)
+                if RegInA = "10000000" then
+                    v_RegStatus(5) := '1'; -- fV
+                end if;
+
             when b"10001" => -- PA (Pass A)
                 acc_ext(7 downto 0) := signed(RegInA);
 
@@ -226,7 +240,31 @@ begin
             when b"11001" => -- SWAP (Swap Nibbles)
                 acc_ext(7 downto 0) := signed(RegInA(3 downto 0) & RegInA(7 downto 4));
 
-            when others => -- Comportamiento por defecto si la operación no está implementada
+            when b"11010" => -- INCB (Increment B → ACC)
+                -- El resultado de B+1 sale por ACC; la UC lo enruta hacia el registro B.
+                nibble_res := nibbleB_ext + 1;
+                v_RegStatus(6) := nibble_res(4); -- fH
+
+                acc_ext := resize(signed(RegInB), 9) + 1;
+                v_RegStatus(7) := acc_ext(8); -- fC
+
+                if RegInB = "01111111" then -- 127+1 = 128: overflow signed
+                    v_RegStatus(5) := '1'; -- fV
+                end if;
+
+            when b"11011" => -- DECB (Decrement B → ACC)
+                -- El resultado de B-1 sale por ACC; la UC lo enruta hacia el registro B.
+                nibble_res := nibbleB_ext - 1;
+                v_RegStatus(6) := not nibble_res(4); -- fH
+
+                acc_ext := resize(signed(RegInB), 9) - 1;
+                v_RegStatus(7) := not acc_ext(8); -- fC (borrow convention)
+
+                if RegInB = "10000000" then -- -128-1 = -129: overflow signed
+                    v_RegStatus(5) := '1'; -- fV
+                end if;
+
+
                 acc_ext := (others => '0');
 
         end case;

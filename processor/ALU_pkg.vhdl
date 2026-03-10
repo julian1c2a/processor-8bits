@@ -14,13 +14,14 @@ package ALU_pkg is
     constant OP_LSR  : STD_LOGIC_VECTOR(4 downto 0) := b"00110"; -- Logical Shift Right
     constant OP_ROL  : STD_LOGIC_VECTOR(4 downto 0) := b"00111"; -- Rotate Left
     constant OP_ROR  : STD_LOGIC_VECTOR(4 downto 0) := b"01000"; -- Rotate Right
-    constant OP_INC  : STD_LOGIC_VECTOR(4 downto 0) := b"01001"; -- Increment
-    constant OP_DEC  : STD_LOGIC_VECTOR(4 downto 0) := b"01010"; -- Decrement
+    constant OP_INC  : STD_LOGIC_VECTOR(4 downto 0) := b"01001"; -- Increment A
+    constant OP_DEC  : STD_LOGIC_VECTOR(4 downto 0) := b"01010"; -- Decrement A
     constant OP_AND  : STD_LOGIC_VECTOR(4 downto 0) := b"01011"; -- AND
     constant OP_OR   : STD_LOGIC_VECTOR(4 downto 0) := b"01100"; -- OR
     constant OP_XOR  : STD_LOGIC_VECTOR(4 downto 0) := b"01101"; -- XOR
-    constant OP_NOT  : STD_LOGIC_VECTOR(4 downto 0) := b"01110"; -- NOT
+    constant OP_NOT  : STD_LOGIC_VECTOR(4 downto 0) := b"01110"; -- NOT A
     constant OP_ASL  : STD_LOGIC_VECTOR(4 downto 0) := b"01111"; -- Arithmetic Shift Left
+    constant OP_NEG  : STD_LOGIC_VECTOR(4 downto 0) := b"10000"; -- NEG A (two's complement)
     constant OP_PA   : STD_LOGIC_VECTOR(4 downto 0) := b"10001"; -- Pass A
     constant OP_PB   : STD_LOGIC_VECTOR(4 downto 0) := b"10010"; -- Pass B
     constant OP_CL   : STD_LOGIC_VECTOR(4 downto 0) := b"10011"; -- Clear ACC
@@ -30,5 +31,8 @@ package ALU_pkg is
     constant OP_CMP  : STD_LOGIC_VECTOR(4 downto 0) := b"10111"; -- Compare
     constant OP_ASR  : STD_LOGIC_VECTOR(4 downto 0) := b"11000"; -- Arithmetic Shift Right
     constant OP_SWAP : STD_LOGIC_VECTOR(4 downto 0) := b"11001"; -- Swap Nibbles
+    constant OP_INCB : STD_LOGIC_VECTOR(4 downto 0) := b"11010"; -- Increment B (result → ACC)
+    constant OP_DECB : STD_LOGIC_VECTOR(4 downto 0) := b"11011"; -- Decrement B (result → ACC)
+    -- Reservados: 11100, 11101, 11110, 11111
 
 end package ALU_pkg;

@@ -267,6 +267,48 @@ def ref_SWAP(a, b, cin):
     Z = common_Z(acc)
     return acc, pack_status(Z=Z, G=G, E=E)
 
+def ref_NEG(a, b, cin):
+    # NEG: 0 - A  (complemento a dos)
+    # Espeja VHDL: acc_ext = signed("000000000") - resize(signed(RegInA), 9)
+    # Half-borrow del nibble: 0 - nibbleA (unsigned 5-bit)
+    nibble_a = a & 0xF
+    nibble_res_4 = 1 if nibble_a > 0 else 0   # borrow bit del nibble
+    H = 0 if nibble_res_4 else 1               # fH = not nibble_res(4)
+    # Resta principal 9 bits (signed extension)
+    full9 = -sign8(a)                          # 0 - sign8(a)
+    acc = u8(full9)
+    bit8 = 1 if full9 < 0 else 0
+    C = 0 if bit8 else 1                       # fC = not acc_ext(8); C=1 solo si A=0x00
+    V = 1 if a == 0x80 else 0                  # overflow: -(-128) = +128 no cabe en signed 8-bit
+    G, E = common_GE(a, b)
+    Z = common_Z(acc)
+    return acc, pack_status(C=C, H=H, V=V, Z=Z, G=G, E=E)
+
+def ref_INCB(a, b, cin):
+    # INCB: ACC ← B+1  (misma aritmética que INC pero sobre B)
+    nh = (b & 0xF) + 1
+    H = 1 if nh > 0xF else 0
+    full9 = sign8(b) + 1
+    acc = u8(full9)
+    C = 1 if full9 < 0 else 0                 # espeja VHDL: fC = acc_ext(8)
+    V = 1 if b == 0x7F else 0
+    G, E = common_GE(a, b)
+    Z = common_Z(acc)
+    return acc, pack_status(C=C, H=H, V=V, Z=Z, G=G, E=E)
+
+def ref_DECB(a, b, cin):
+    # DECB: ACC ← B-1  (misma aritmética que DEC pero sobre B)
+    nh = (b & 0xF) - 1
+    H = 1 if nh >= 0 else 0
+    full9 = sign8(b) - 1
+    acc = u8(full9)
+    bit8 = 1 if full9 < 0 else 0
+    C = 0 if bit8 else 1                      # fC = not acc_ext(8)
+    V = 1 if b == 0x80 else 0
+    G, E = common_GE(a, b)
+    Z = common_Z(acc)
+    return acc, pack_status(C=C, H=H, V=V, Z=Z, G=G, E=E)
+
 # ---------------------------------------------------------------------------
 # Registro de operaciones: nombre → (opcode_5bit, función_ref, usa_cin)
 # ---------------------------------------------------------------------------
@@ -297,6 +339,9 @@ OPERATIONS = {
     "CMP":  (0b10111, ref_CMP,  False),
     "ASR":  (0b11000, ref_ASR,  False),
     "SWAP": (0b11001, ref_SWAP, False),
+    "NEG":  (0b10000, ref_NEG,  False),
+    "INCB": (0b11010, ref_INCB, False),
+    "DECB": (0b11011, ref_DECB, False),
 }
 
 # ---------------------------------------------------------------------------
