@@ -592,9 +592,9 @@ Los opcodes marcados con `---` están **reservados** para extensiones futuras
 | 1-byte ALU        | 4              | 2 fetch + 2 execute (ALU combinacional)                  |
 | `LD A, #n`        | 6              | 2 fetch opcode + 2 fetch imm8 + 2 write A                |
 | `LD A, [n]`       | 8              | 2 fetch op + 2 fetch addr + 2 mem read + 2 write A       |
-| `LD A, [nn]`      | 10             | 2 fetch op + 2×2 fetch addr16 + 2 mem read + 2 write A  |
+| `LD A, [nn]`      | 10             | 2 fetch op + 2×2 fetch addr16 + 2 mem read + 2 write A   |
 | `ST A, [nn]`      | 10             | similar a LD                                             |
-| `CALL nn`         | 14             | fetch(2) + fetch addr16(4) + push PCH(4) + push PCL(4)  |
+| `CALL nn`         | 14             | fetch(2) + fetch addr16(4) + push PCH(4) + push PCL(4)   |
 | `RET`             | 10             | fetch(2) + pop PCL(4) + pop PCH(4)                       |
 | `BEQ rel8`        | 6 / 8          | 6 sin salto, 8 con salto (actualizar PC)                 |
 | `JP nn`           | 10             | 2 fetch + 4 fetch addr16 + 4 load PC                     |

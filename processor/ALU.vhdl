@@ -176,7 +176,7 @@ begin
                 v_RegStatus(6) := not nibble_res(4); -- fH (borrow convention igual que SUB)
 
                 -- Resta principal 9 bits: 0 - sign_ext(A)
-                acc_ext := signed("000000000") - resize(signed(RegInA), 9);
+                acc_ext := - resize(signed(RegInA), 9);
                 v_RegStatus(7) := not acc_ext(8); -- fC: NOT borrow (C=1 sólo si A=0x00)
 
                 -- Overflow: único caso es A=0x80 (-128); negarlo daría +128 (no cabe en signed 8-bit)
@@ -264,8 +264,8 @@ begin
                     v_RegStatus(5) := '1'; -- fV
                 end if;
 
-
-                acc_ext := (others => '0');
+            when others => -- Opcodes reservados (11100–11111): salida = 0x00
+                null;
 
         end case;
 

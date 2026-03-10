@@ -13,6 +13,12 @@ BUILDDIR_TESTS = $(BUILDDIR)/build_tests
 GHDL      = /ucrt64/bin/ghdl
 GHDLFLAGS = --std=08 --workdir=$(BUILDDIR)
 
+# En Windows, asegurar que ucrt64/bin se busque antes que usr/bin (Cygwin) para
+# que GHDL use el gcc de MinGW/ucrt64 al elaborar y enlazar los ejecutables.
+ifeq ($(OS),Windows_NT)
+    export PATH := C:/msys64/ucrt64/bin:$(PATH)
+endif
+
 # Python interpreter
 PYTHON = python
 
@@ -32,7 +38,7 @@ TB_EXECS = $(patsubst $(SRCDIR_TB)/%_tb.vhdl, $(BUILDDIR_TESTS)/%_tb$(EXT), $(MA
 
 # Exhaustive test operations
 EX_OPS = NOP ADD ADC SUB SBB LSL LSR ROL ROR INC DEC AND OR XOR NOT ASL \
-         PA PB CL SET MUL MUH CMP ASR SWAP
+         PA PB CL SET MUL MUH CMP ASR SWAP NEG INCB DECB
 
 ifeq ($(OS),Windows_NT)
     EXT = .exe
