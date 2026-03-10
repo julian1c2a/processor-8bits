@@ -411,7 +411,9 @@ SUB/SBB  [ *  *  *  *  *  *  -  - ]
 CMP      [ *  *  *  *  *  *  -  - ]
 AND/OR/XOR [-  -  -  *  *  *  -  - ]
 NOT      [ -  -  -  *  -  -  -  - ]
+NEG      [ *  *  *  *  -  -  -  - ]
 INC/DEC  [ *  *  *  *  -  -  -  - ]
+INCB/DECB[ *  *  *  *  -  -  -  - ]   (resultado en ACC; UC lo ruta a B)
 LSL/ASL  [ -  -  */- *  -  -  -  * ]   (ASL activa V)
 LSR/ASR  [ -  -  -  *  -  -  *  - ]
 ROL      [ *  -  -  *  -  -  -  - ]
@@ -433,18 +435,137 @@ SEC/CLC  [ *  -  -  -  -  -  -  - ]
 
 ```
       0    1    2    3    4    5    6    7    8    9    A    B    C    D    E    F
-0x  NOP HALT  SEC  CLC  SEI  CLI  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
-1x  LDA  LDA  LDA  LDA  LDA  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
-        B   #n  [n] [nn]  [B]
-2x  LDB  LDB  LDB  LDB  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
-        A   #n  [n] [nn]
-3x  STA  STA  STA  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
-       [n] [nn]  [B]
-4x  STB  STB  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
-       [n] [nn]
+0x  NOP HALT  SEC  CLC  SEI  CLI  RTI  ---  ---  ---  ---  ---  ---  ---  ---  ---
+1x  LDA  LDA  LDA  LDA  LDA LDA  LDA  ---  ---  ---  ---  ---  ---  ---  ---  ---
+        B   #n  [n] [nn]  [B][nn+B][n+B]
+2x  LDB  LDB  LDB  LDB  LDB LDB  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
+        A   #n  [n] [nn]  [B][nn+B]
+3x  STA  STA  STA STA STA  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
+       [n] [nn]  [B][nn+B][n+B]
+4x  STB  STB  STB  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
+       [n] [nn][nn+B]
 5x LDSP LDSP RDSP RDSP  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
       #nn A:B   _L   _H
 6x PUSHA PUSHB PUSHF POPA POPB POPF  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
+7x   JP   JR  JPN  JP() JP CALL CALL  RET  ---  ---  ---  ---  ---  ---  ---  ---
+       nn   r8   p8  [nn] A:B   nn  [nn]
+8x  BEQ  BNE  BCS  BCC  BVS  BVC  BGT  BLE  BGE  BLT  BHC BEQ2  ---  ---  ---  ---
+9x  ADD  ADC  SUB  SBB  AND   OR  XOR  CMP  MUL  MUH  ---  ---  ---  ---  ---  ---
+Ax ADD# ADC# SUB# SBB# AND#  OR# XOR# CMP#  ---  ---  ---  ---  ---  ---  ---  ---
+Bx ADD[] ADD[nn] SUB[] SUB[nn] AND[] OR[] XOR[] CMP[] ADD[nn+B] SUB[nn+B] AND[nn+B] OR[nn+B] XOR[nn+B] CMP[nn+B]  ---  ---
+Cx  NOT  NEG  INC  DEC INCB DECB  CLR  SET  LSL  LSR  ASL  ASR  ROL  ROR SWAP  ---
+Dx  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  (IN/OUT — por asignar)
+Ex  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
+Fx  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
+```
+
+Los opcodes marcados con `---` están **reservados** para extensiones futuras.
+
+---
+
+## 10. Ciclos de Bus (estimación de micro-operaciones)
+
+| Instrucción       | Ciclos mínimos | Descripción                                              |
+|-------------------|----------------|----------------------------------------------------------|
+| NOP, HALT         | 4              | 2 fetch + 2 decode/execute                               |
+| 1-byte ALU        | 4              | 2 fetch + 2 execute (ALU combinacional)                  |
+| `LD A, #n`        | 6              | 2 fetch opcode + 2 fetch imm8 + 2 write A                |
+| `LD A, [n]`       | 8              | 2 fetch op + 2 fetch addr + 2 mem read + 2 write A       |
+| `LD A, [nn]`      | 10             | 2 fetch op + 2×2 fetch addr16 + 2 mem read + 2 write A  |
+| `LD A, [nn+B]`    | 12             | igual que [nn] + 2 ciclos suma de índice                 |
+| `ST A, [nn]`      | 10             | similar a LD                                             |
+| `CALL nn`         | 14             | fetch(2) + fetch addr16(4) + push PCH(4) + push PCL(4)  |
+| `RET`             | 10             | fetch(2) + pop PCL(4) + pop PCH(4)                       |
+| `RTI`             | 12             | fetch(2) + pop F(4) + pop PCL(4) + pop PCH(4) + SEI     |
+| `BEQ rel8`        | 6 / 8          | 6 sin salto, 8 con salto (actualizar PC)                 |
+| `JP nn`           | 10             | 2 fetch + 4 fetch addr16 + 4 load PC                     |
+
+> Estos valores son orientativos. La microarquitectura final determinará los
+> ciclos exactos según el diseño de la Unidad de Control.
+
+---
+
+## 11. Ejemplos de Código
+
+### Suma de dos valores en memoria
+
+```asm
+    LD  A, [0x10]     ; A ← M[0x0010]
+    LD  B, [0x11]     ; B ← M[0x0011]
+    ADD               ; A ← A + B
+    ST  A, [0x12]     ; M[0x0012] ← A
+```
+
+### Recorrer un array indexado por B
+
+```asm
+    LD  B, #0x00      ; índice = 0
+loop:
+    LD  A, [0x20+B]   ; A ← M[0x0020 + B]  (modo indexado)
+    ; ... procesar A ...
+    INC B             ; B++
+    CMP #8            ; ¿B == 8?
+    BNE loop
+```
+
+### Negar un valor (complemento a dos)
+
+```asm
+    LD  A, #0x05      ; A = 5
+    NEG A             ; A = -5  (0xFB)
+    ; flag C=0 (borrow), V=0, Z=0
+```
+
+### ISR mínima (rutina de servicio de interrupción)
+
+```asm
+    ; Al entrar, la UC ha hecho push automático de PCH, PCL, F; I←0
+isr:
+    PUSH A            ; salvar A
+    PUSH B            ; salvar B
+    ; ... cuerpo de la ISR ...
+    OUT  0x31, A      ; limpiar flag en IFR (escribir 1 en el bit)
+    POP  B
+    POP  A
+    RTI               ; restaura F, PC; I←1
+```
+
+### Llamada a subrutina
+
+```asm
+    LD  A, #42
+    LD  B, #7
+    CALL 0x0200       ; salta a subrutina en 0x0200
+    ST   A, [0x50]    ; guarda resultado
+    HALT
+
+; Subrutina en 0x0200: A ← A * B (los 8 bits bajos)
+0x0200:
+    MUL               ; A ← (A × B)[7:0]
+    RET
+```
+
+---
+
+## 12. Decisiones de Diseño
+
+### Resueltas
+
+- [x] **NEG A**: implementado en ALU (opcode ALU `0x10`, instrucción `0xC1`).
+- [x] **INC B / DEC B**: implementados en ALU (opcodes ALU `0x1A`/`0x1B`, instrucciones `0xC4`/`0xC5`).
+- [x] **Modos indexados**: `LD A, [nn+B]` / `ST A, [nn+B]` y variantes implementados.
+- [x] **E/S separada**: decidido espacio I/O de 256 puertos independiente del mapa de memoria; instrucciones `IN`/`OUT` (opcodes Dx — por asignar).
+- [x] **Interrupciones**: vector IRQ `0xFFFE:0xFFFF`, vector NMI `0xFFFA:0xFFFB`; flag I (flip-flop interno); `SEI`/`CLI`/`RTI`; IMR/IFR en puertos `0x30`/`0x31`.
+- [x] **RTI**: opcode `0x06`; restaura F, PC e I.
+
+### Pendientes
+
+- [ ] **Instrucciones IN/OUT**: asignar opcodes en rango `0xDx`; definir `IN A, #n` / `IN A, [B]` / `OUT #n, A` / `OUT [B], A`.
+- [ ] **Instrucciones de 16 bits sobre A:B**: suma/resta de 16 bits tratando A:B como par (útil para aritmética de punteros).
+- [ ] **Wait states**: protocolo de bus para memoria lenta.
+- [ ] **Ciclos de reloj exactos por instrucción**: afinar cuando se diseñe la Unidad de Control.
+- [ ] **Segundo canal UART**: puertos `0x05`–`0x0F` reservados.
+- [ ] **Acceso atómico a contadores de 32 bits**: latch de snapshot al leer TMR_CNT0 para evitar race condition entre bytes.
 7x   JP   JR  JPN JP()  JP   CALL CALL  RET  ---  ---  ---  ---  ---  ---  ---  ---
        nn  r8   p8  [nn] A:B   nn  [nn]
 8x  BEQ  BNE  BCS  BCC  BVS  BVC  BGT  BLE  BGE  BLT  BHC BEQ2  ---  ---  ---  ---
@@ -455,6 +576,7 @@ Cx  NOT  NEG  INC  DEC INCB DECB  CLR  SET  LSL  LSR  ASL  ASR  ROL  ROR SWAP  -
 Dx  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
 Ex  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
 Fx  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
+
 ```
 
 Los opcodes marcados con `---` están **reservados** para extensiones futuras

@@ -58,8 +58,11 @@ end entity ALU;
 | `ADC`  | `00010` | `0x02` | `ACC ← A + B + Cin` | C, H, V, Z |
 | `SUB`  | `00011` | `0x03` | `ACC ← A - B` | C(borrow), H(borrow), V, Z |
 | `SBB`  | `00100` | `0x04` | `ACC ← A - B - Cin` | C(borrow), H(borrow), V, Z |
+| `NEG`  | `10000` | `0x10` | `ACC ← −A` (complemento a dos: 0−A) | C(borrow), H(borrow), V, Z |
 | `INC`  | `01001` | `0x09` | `ACC ← A + 1` | C, H, V, Z |
 | `DEC`  | `01010` | `0x0A` | `ACC ← A - 1` | C(borrow), H(borrow), V, Z |
+| `INCB` | `11010` | `0x1A` | `ACC ← B + 1` (UC enruta resultado a B) | C, H, V, Z |
+| `DECB` | `11011` | `0x1B` | `ACC ← B - 1` (UC enruta resultado a B) | C(borrow), H(borrow), V, Z |
 | `MUL`  | `10101` | `0x15` | `ACC ← (A × B)[7:0]` | C si producto > 255, Z |
 | `MUH`  | `10110` | `0x16` | `ACC ← (A × B)[15:8]` | C si byte alto ≠ 0, Z |
 
