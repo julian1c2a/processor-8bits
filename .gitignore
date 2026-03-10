@@ -9,3 +9,4 @@ build/
 *.lst
 *~*
 .*/
+testbenchs/vectors/
