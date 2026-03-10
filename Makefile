@@ -76,14 +76,21 @@ $(RUN_EXEC): $(OBJS_PROC) $(OBJS_TB) | $(BUILDDIR_TESTS)
 # Solo compilar el simulador interactivo (sin lanzarlo)
 sim-compile: $(RUN_EXEC)
 
-# Compilar (si hace falta) y lanzar el simulador interactivo.
-# En MSYS2/mintty el Python nativo de Windows necesita winpty para que
-# input() funcione (mintty usa pty POSIX, no consola Win32).
-WINPTY := $(shell which winpty 2>/dev/null)
-PYTHON_INTERACTIVE := $(if $(WINPTY),winpty $(PYTHON),$(PYTHON))
-
+# Compilar y mostrar el comando para lanzar el simulador.
+# NOTA: make no puede lanzar programas interactivos en mintty porque
+# winpty falla cuando es nieto del terminal (mintty→make→winpty).
+# Hay que ejecutar alu_sim.py directamente desde el prompt de mintty.
 sim: $(RUN_EXEC)
-	$(PYTHON_INTERACTIVE) $(SRCDIR_TB)/alu_sim.py
+	@echo ""
+	@echo "  Simulador compilado: $(RUN_EXEC)"
+	@echo ""
+	@echo "  Modo interactivo — ejecuta directamente desde mintty:"
+	@echo "    winpty $(PYTHON) $(SRCDIR_TB)/alu_sim.py"
+	@echo ""
+	@echo "  Calculo directo (sin winpty):"
+	@echo "    $(PYTHON) $(SRCDIR_TB)/alu_sim.py ADD 10 20"
+	@echo "    $(PYTHON) $(SRCDIR_TB)/alu_sim.py ADC 0xFF 0x01 1"
+	@echo ""
 
 # Run exhaustive tests for all operations
 test-exhaustive: $(EX_EXEC) $(EX_CSVS)

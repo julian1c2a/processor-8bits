@@ -248,18 +248,10 @@ def main() -> None:
         return
 
     # Modo interactivo
-    # Detectar si stdin es interactivo; en MSYS2/mintty con Python nativo de
-    # Windows, stdin puede aparecer como no-TTY. Se advierte al usuario.
-    if not sys.stdin.isatty():
-        print(
-            "\n  AVISO: stdin no es una TTY interactiva.\n"
-            "  En MSYS2/mintty usa:\n"
-            "    winpty python testbenchs/alu_sim.py\n"
-            "  O bien 'make sim' (lo hace automáticamente).\n",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
+    # En MSYS2/mintty con Python nativo de Windows, input() falla porque
+    # mintty expone un pty POSIX y Python Win32 no lo reconoce como TTY.
+    # La solución es ejecutar directamente desde el prompt con winpty:
+    #   winpty python testbenchs/alu_sim.py
     print("=" * 50)
     print("  ALU 8-bit — Simulador VHDL interactivo")
     print("=" * 50)
