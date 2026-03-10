@@ -8,7 +8,7 @@ BUILDDIR    = build
 BUILDDIR_TESTS = $(BUILDDIR)/build_tests
 
 # GHDL options
-GHDL      = ghdl
+GHDL      = /mingw64/bin/ghdl
 GHDLFLAGS = --std=08 --workdir=$(BUILDDIR)
 
 # Python interpreter

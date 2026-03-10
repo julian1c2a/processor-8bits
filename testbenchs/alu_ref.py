@@ -84,27 +84,34 @@ def ref_ADC(a, b, cin):
     return acc, pack_status(C=C, H=H, V=V, Z=Z, G=G, E=E)
 
 def ref_SUB(a, b, cin):
-    nh = (a & 0xF) - (b & 0xF)
-    H = 0 if nh < 0 else 1          # H=0 significa borrow en nibble
-    full_s = sign8(a) - sign8(b)
-    acc = u8(a - b)
-    borrow = 1 if a < b else 0
-    C = 0 if borrow else 1           # C=0 → hubo borrow (convención ALU)
+    # Espeja exactamente la ALU VHDL: resize(signed,9) - resize(signed,9)
+    # C = not acc_ext(8)  donde acc_ext es la resta en signed 9-bit
+    sa = sign8(a)  # signed 8-bit de A
+    sb = sign8(b)  # signed 8-bit de B
+    full9 = sa - sb          # resta en aritmética signed
+    acc = u8(full9)
+    # acc_ext(8) es el bit de signo del resultado de 9 bits signed
+    # En Python: si full9 es negativo en 9 bits signed → bit8=1
+    bit8 = 1 if (full9 < -128 or full9 > 127) and full9 < 0 else (1 if full9 < 0 else 0)
+    # Más directamente: acc_ext(8) = MSB del resultado signed 9-bit
+    # signed 9-bit rango: -256..255; bit8 = sign bit
+    bit8 = 1 if full9 < 0 else 0
+    C = 0 if bit8 else 1             # C = not acc_ext(8)
     H = 1 if (a & 0xF) >= (b & 0xF) else 0
-    # Overflow: signos distintos y resultado igual al signo de B
     V = 1 if bit(a,7)!=bit(b,7) and bit(acc,7)==bit(b,7) else 0
     G, E = common_GE(a, b)
     Z = common_Z(acc)
     return acc, pack_status(C=C, H=H, V=V, Z=Z, G=G, E=E)
 
 def ref_SBB(a, b, cin):
-    # a - b - cin (borrow)
-    raw = a - b - cin
-    acc = u8(raw)
-    borrow = 1 if raw < 0 else 0
-    C = 0 if borrow else 1
-    nh = (a & 0xF) - (b & 0xF) - cin
-    H = 1 if nh >= 0 else 0
+    # Espeja: resize(signed,9) - resize(signed,9) - signed(cin)
+    sa = sign8(a)
+    sb = sign8(b)
+    full9 = sa - sb - cin
+    acc = u8(full9)
+    bit8 = 1 if full9 < 0 else 0
+    C = 0 if bit8 else 1             # C = not acc_ext(8)
+    H = 1 if (a & 0xF) >= (b & 0xF) + cin else 0
     V = 1 if bit(a,7)!=bit(b,7) and bit(acc,7)==bit(b,7) else 0
     G, E = common_GE(a, b)
     Z = common_Z(acc)
@@ -139,9 +146,14 @@ def ref_ROR(a, b, cin):
 def ref_INC(a, b, cin):
     nh = (a & 0xF) + 1
     H = 1 if nh > 0xF else 0
-    full = a + 1
-    C = 1 if full > 0xFF else 0
-    acc = u8(full)
+    # ALU: acc_ext = resize(signed(RegInA),9) + 1  → fC = acc_ext(8)
+    # signed 9-bit: si el resultado signed(a)+1 necesita más de 8 bits signed
+    full9 = sign8(a) + 1
+    acc = u8(full9)
+    # acc_ext(8) en VHDL signed 9-bit: bit8 = carry out, que es bit 8 unsigned
+    # Para INC: resize unsigned a 9 bits y sumar 1
+    full9u = a + 1
+    C = 1 if full9u > 0xFF else 0
     V = 1 if a == 0x7F else 0
     G, E = common_GE(a, b)
     Z = common_Z(acc)
@@ -150,10 +162,11 @@ def ref_INC(a, b, cin):
 def ref_DEC(a, b, cin):
     nh = (a & 0xF) - 1
     H = 1 if nh >= 0 else 0
-    raw = a - 1
-    borrow = 1 if raw < 0 else 0
-    C = 0 if borrow else 1
-    acc = u8(raw)
+    # ALU: acc_ext = resize(signed(RegInA),9) - 1  → fC = not acc_ext(8)
+    full9 = sign8(a) - 1
+    acc = u8(full9)
+    bit8 = 1 if full9 < 0 else 0
+    C = 0 if bit8 else 1             # C = not acc_ext(8)
     V = 1 if a == 0x80 else 0
     G, E = common_GE(a, b)
     Z = common_Z(acc)
@@ -231,17 +244,16 @@ def ref_MUH(a, b, cin):
 
 def ref_CMP(a, b, cin):
     # ACC no se modifica (queda 0x00), pero flags reflejan a-b
-    nh = (a & 0xF) - (b & 0xF)
-    H = 1 if nh >= 0 else 0
-    raw = sign8(a) - sign8(b)
-    raw9 = a - b   # unsigned 9-bit
-    borrow = 1 if raw9 < 0 else 0
-    C = 0 if borrow else 1
-    sub = u8(a - b)
+    # Misma aritmética que SUB: resize(signed,9) - resize(signed,9)
+    H = 1 if (a & 0xF) >= (b & 0xF) else 0
+    sa, sb = sign8(a), sign8(b)
+    full9 = sa - sb
+    sub = u8(full9)
+    bit8 = 1 if full9 < 0 else 0
+    C = 0 if bit8 else 1
     V = 1 if bit(a,7)!=bit(b,7) and bit(sub,7)==bit(b,7) else 0
     Z = 1 if sub == 0 else 0
     G, E = common_GE(a, b)
-    # CMP no actualiza fG/fE con la lógica común — la ALU SÍ los calcula
     return 0, pack_status(C=C, H=H, V=V, Z=Z, G=G, E=E)
 
 def ref_ASR(a, b, cin):
@@ -262,31 +274,31 @@ def ref_SWAP(a, b, cin):
 # ---------------------------------------------------------------------------
 
 OPERATIONS = {
-    "NOP":  ("00000", ref_NOP,  False),
-    "ADD":  ("00001", ref_ADD,  False),
-    "ADC":  ("00010", ref_ADC,  True),
-    "SUB":  ("00011", ref_SUB,  False),
-    "SBB":  ("00100", ref_SBB,  True),
-    "LSL":  ("00101", ref_LSL,  False),
-    "LSR":  ("00110", ref_LSR,  False),
-    "ROL":  ("00111", ref_ROL,  False),
-    "ROR":  ("01000", ref_ROR,  False),
-    "INC":  ("01001", ref_INC,  False),
-    "DEC":  ("01010", ref_DEC,  False),
-    "AND":  ("01011", ref_AND,  False),
-    "OR":   ("01100", ref_OR,   False),
-    "XOR":  ("01101", ref_XOR,  False),
-    "NOT":  ("01110", ref_NOT,  False),
-    "ASL":  ("01111", ref_ASL,  False),
-    "PA":   ("10001", ref_PA,   False),
-    "PB":   ("10010", ref_PB,   False),
-    "CL":   ("10011", ref_CL,   False),
-    "SET":  ("10100", ref_SET,  False),
-    "MUL":  ("10101", ref_MUL,  False),
-    "MUH":  ("10110", ref_MUH,  False),
-    "CMP":  ("10111", ref_CMP,  False),
-    "ASR":  ("11000", ref_ASR,  False),
-    "SWAP": ("11001", ref_SWAP, False),
+    "NOP":  (0b00000, ref_NOP,  False),
+    "ADD":  (0b00001, ref_ADD,  False),
+    "ADC":  (0b00010, ref_ADC,  True),
+    "SUB":  (0b00011, ref_SUB,  False),
+    "SBB":  (0b00100, ref_SBB,  True),
+    "LSL":  (0b00101, ref_LSL,  False),
+    "LSR":  (0b00110, ref_LSR,  False),
+    "ROL":  (0b00111, ref_ROL,  False),
+    "ROR":  (0b01000, ref_ROR,  False),
+    "INC":  (0b01001, ref_INC,  False),
+    "DEC":  (0b01010, ref_DEC,  False),
+    "AND":  (0b01011, ref_AND,  False),
+    "OR":   (0b01100, ref_OR,   False),
+    "XOR":  (0b01101, ref_XOR,  False),
+    "NOT":  (0b01110, ref_NOT,  False),
+    "ASL":  (0b01111, ref_ASL,  False),
+    "PA":   (0b10001, ref_PA,   False),
+    "PB":   (0b10010, ref_PB,   False),
+    "CL":   (0b10011, ref_CL,   False),
+    "SET":  (0b10100, ref_SET,  False),
+    "MUL":  (0b10101, ref_MUL,  False),
+    "MUH":  (0b10110, ref_MUH,  False),
+    "CMP":  (0b10111, ref_CMP,  False),
+    "ASR":  (0b11000, ref_ASR,  False),
+    "SWAP": (0b11001, ref_SWAP, False),
 }
 
 # ---------------------------------------------------------------------------
