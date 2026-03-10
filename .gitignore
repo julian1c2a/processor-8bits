@@ -2,3 +2,8 @@
 *.exe
 *.cf
 e~alu_tb.o
+e~alu_tb.exe
+e~alu_tb.cf
+build/
+*.log
+.*/
