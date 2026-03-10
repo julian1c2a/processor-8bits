@@ -6,4 +6,5 @@ e~alu_tb.exe
 e~alu_tb.cf
 build/
 *.log
+*.lst
 .*/

@@ -162,6 +162,14 @@ begin
             when b"01110" => -- NOT
                 acc_ext(7 downto 0) := signed(not RegInA);
 
+            when b"01111" => -- ASL (Arithmetic Shift Left)
+                acc_ext(7 downto 0) := signed(RegInA(6 downto 0) & '0');
+                v_RegStatus(0) := RegInA(7); -- fL: bit desplazado fuera
+                -- Overflow (V): el bit de signo cambia (x2 signed desborda)
+                if RegInA(7) /= acc_ext(7) then
+                    v_RegStatus(5) := '1'; -- fV
+                end if;
+
             when b"10001" => -- PA (Pass A)
                 acc_ext(7 downto 0) := signed(RegInA);
 
