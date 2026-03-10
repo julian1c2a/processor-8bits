@@ -8,8 +8,8 @@ BUILDDIR    = build
 BUILDDIR_TESTS = $(BUILDDIR)/build_tests
 
 # GHDL options
-# En MSYS2 MinGW64 el binario está en /mingw64/bin/ghdl
-# Desde PowerShell: añadir C:\msys64\mingw64\bin al PATH o usar mingw32-make
+# En MSYS2/ucrt64 el binario está en /ucrt64/bin/ghdl
+# Desde PowerShell: añadir C:\msys64\ucrt64\bin al PATH o usar mingw32-make
 GHDL      = /ucrt64/bin/ghdl
 GHDLFLAGS = --std=08 --workdir=$(BUILDDIR)
 
@@ -24,8 +24,10 @@ VHDL_SRCS_TB   = $(wildcard $(SRCDIR_TB)/*.vhdl)
 OBJS_PROC = $(patsubst $(SRCDIR_PROC)/%.vhdl, $(BUILDDIR)/%.o, $(VHDL_SRCS_PROC))
 OBJS_TB   = $(patsubst $(SRCDIR_TB)/%.vhdl,   $(BUILDDIR)/%.o, $(VHDL_SRCS_TB))
 
-# Standard testbench executables (all *_tb.vhdl except ALU_exhaustive_tb)
-MANUAL_TB_SRCS  = $(filter-out $(SRCDIR_TB)/ALU_exhaustive_tb.vhdl, $(VHDL_SRCS_TB))
+# Standard testbench executables (excluir exhaustivo e interactivo)
+MANUAL_TB_SRCS  = $(filter-out $(SRCDIR_TB)/ALU_exhaustive_tb.vhdl \
+                               $(SRCDIR_TB)/ALU_run_tb.vhdl, \
+                               $(VHDL_SRCS_TB))
 TB_EXECS = $(patsubst $(SRCDIR_TB)/%_tb.vhdl, $(BUILDDIR_TESTS)/%_tb$(EXT), $(MANUAL_TB_SRCS))
 
 # Exhaustive test operations
@@ -39,8 +41,11 @@ endif
 EX_EXEC   = $(BUILDDIR_TESTS)/ALU_exhaustive_tb$(EXT)
 EX_CSVS   = $(patsubst %, $(VECTORS_DIR)/%.csv, $(EX_OPS))
 
+# Simulador interactivo
+RUN_EXEC  = $(BUILDDIR_TESTS)/ALU_run_tb$(EXT)
+
 # -------------------------------------------------------------------------
-.PHONY: all compile test test-exhaustive vectors clean
+.PHONY: all compile test test-exhaustive vectors sim sim-compile clean
 
 all: compile
 
@@ -63,6 +68,22 @@ $(VECTORS_DIR)/%.csv: $(SRCDIR_TB)/alu_ref.py
 # Build the exhaustive testbench executable (compiled once, run per-op)
 $(EX_EXEC): $(OBJS_PROC) $(OBJS_TB) | $(BUILDDIR_TESTS)
 	$(GHDL) -e $(GHDLFLAGS) -o $@ ALU_exhaustive_tb
+
+# Build the interactive run testbench executable
+$(RUN_EXEC): $(OBJS_PROC) $(OBJS_TB) | $(BUILDDIR_TESTS)
+	$(GHDL) -e $(GHDLFLAGS) -o $@ ALU_run_tb
+
+# Solo compilar el simulador interactivo (sin lanzarlo)
+sim-compile: $(RUN_EXEC)
+
+# Compilar (si hace falta) y lanzar el simulador interactivo.
+# En MSYS2/mintty el Python nativo de Windows necesita winpty para que
+# input() funcione (mintty usa pty POSIX, no consola Win32).
+WINPTY := $(shell which winpty 2>/dev/null)
+PYTHON_INTERACTIVE := $(if $(WINPTY),winpty $(PYTHON),$(PYTHON))
+
+sim: $(RUN_EXEC)
+	$(PYTHON_INTERACTIVE) $(SRCDIR_TB)/alu_sim.py
 
 # Run exhaustive tests for all operations
 test-exhaustive: $(EX_EXEC) $(EX_CSVS)
