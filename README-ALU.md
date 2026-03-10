@@ -1,85 +1,109 @@
-# ALU 8-bit Operations
+# ALU 8-bit
 
-This document describes the operations supported by the 8-bit Arithmetic Logic Unit (ALU), based on the implementation in `ALU.vhdl`.
+Implementación de una Unidad Aritmético-Lógica de 8 bits en VHDL (VHDL-2008).
 
-**Note:** The VHDL file is nearly complete. The documentation below reflects what is currently implemented.
+## Archivos
 
-## Operands
-
-The ALU operates on two 8-bit registers:
-
--   **Register A**: `RegInA`
--   **Register B**: `RegInB`
-
-The result of the operations is stored in the `ACC` (Accumulator) register.
-
----
-
-## Operations
-
-### Core & Comparison Operations
-
-| Operation | Description | Affected Flags (as per `ALU.vhdl`) | Opcode (HEX) |
-| :--- | :--- | :--- | :--- |
-| `NOP` | No Operation. ACC defaults to `0x00`. | - | `00` |
-| `CMP` | Compare `A` with `B` (calculates `A-B`), updates flags but does not alter `ACC`. | `C`, `H`, `V`, `Z` | `17` |
-
-### Arithmetic Operations
-
-| Operation | Description | Affected Flags (as per `ALU.vhdl`) | Opcode (HEX) |
-| :--- | :--- | :--- | :--- |
-| `ADD` | `ACC <= A + B` | `C`, `H`, `V`, `Z` | `1` |
-| `ADC` | `ACC <= A + B + Carry_in` | `C`, `H`, `V`, `Z` | `2` |
-| `SUB` | `ACC <= A - B` | `C` (borrow), `H` (borrow), `V`, `Z` | `3` |
-| `SBB` | `ACC <= A - B - Carry_in`| `C` (borrow), `H` (borrow), `V`, `Z` | `4` |
-| `LSL` | `ACC <= A(6:0) & '0'` | `L`, `Z` | `5` |
-| `LSR` | `ACC <= '0' & A(7:1)` | `R`, `Z` | `6` |
-| `ROL` | `ACC <= A(6:0) & A(7)` | `Z` | `7` |
-| `ROR` | `ACC <= A(0) & A(7:1)` | `Z` | `8` |
-| `INC` | `ACC <= A + 1` | `C`, `H`, `V`, `Z` | `9` |
-| `DEC` | `ACC <= A - 1` | `C` (borrow), `H` (borrow), `V`, `Z` | `A` |
-| `MUL` | `ACC <= (A * B)(7:0)` | `C`, `Z` | `15` |
-| `MUH` | `ACC <= (A * B)(15:8)` | `C`, `Z` | `16` |
-| `ASR` | `ACC <= A(7) & A(7:1)` | `R`, `Z` | `18` |
-| `SWAP`| `ACC <= A(3:0) & A(7:4)` | `Z` | `19` |
-
-### Logical & Transfer Operations
-
-| Operation | Description | Affected Flags (as per `ALU.vhdl`) | Opcode (HEX) |
-| :--- | :--- | :--- | :--- |
-| `AND` | `ACC <= A AND B` | `Z` | `B` |
-| `OR`  | `ACC <= A OR B`  | `Z` | `C` |
-| `XOR` | `ACC <= A XOR B` | `Z` | `D` |
-| `NOT` | `ACC <= NOT A`   | `Z` | `E` |
-| `PA`  | `ACC <= A`       | `Z` | `11` |
-| `PB`  | `ACC <= B`       | `Z` | `12` |
-| `CL`  | `ACC <= 0x00`    | `Z` | `13` |
-| `SET` | `ACC <= 0xFF`    | `Z` | `14` |
-
-### Unimplemented Operations
-
-The following operations are defined but not yet implemented.
-
-| Operation | Description | Opcode (HEX) |
-| :--- | :--- | :--- |
-| `GT`  | `ACC <= 0x00 if A > B, else 0x01` | `F` |
-| `EQ`  | `ACC <= 0x00 if A = B, else 0x01` | `10`|
+| Archivo | Descripción |
+|---|---|
+| `processor/ALU.vhdl` | Implementación de la ALU |
+| `processor/ALU_pkg.vhdl` | Package con las constantes de opcodes |
+| `testbenchs/ALU_tb.vhdl` | Testbench manual (casos de prueba seleccionados) |
+| `testbenchs/ALU_exhaustive_tb.vhdl` | Testbench exhaustivo (lee vectores desde CSV) |
+| `testbenchs/alu_ref.py` | Oráculo Python: genera vectores de test para todas las operaciones |
 
 ---
 
-## Status Flags (RegStatus)
+## Interfaz
 
-The `RegStatus` is an 8-bit register that holds the status flags. Its behavior is determined by the VHDL implementation.
+```vhdl
+entity ALU is
+    Port (
+        RegInA    : in  STD_LOGIC_VECTOR(7 downto 0);  -- Operando A
+        RegInB    : in  STD_LOGIC_VECTOR(7 downto 0);  -- Operando B
+        Oper      : in  STD_LOGIC_VECTOR(4 downto 0);  -- Código de operación
+        Carry_in  : in  STD_LOGIC := '0';              -- Carry/Borrow entrada (ADC, SBB)
+        RegOutACC : out STD_LOGIC_VECTOR(7 downto 0);  -- Resultado (Acumulador)
+        RegStatus : out STD_LOGIC_VECTOR(7 downto 0)   -- Flags de estado
+    );
+end entity ALU;
+```
 
-`RegStatus[7:0] = (C, H, V, Z, G, E, R, L)`
+---
 
-| Bit | Flag | Name | VHDL Implementation Details |
+## Flags de estado (RegStatus)
+
+`RegStatus[7:0] = ( C, H, V, Z, G, E, R, L )`
+
+| Bit | Flag | Nombre | Descripción |
 |:---:|:----:|:---|:---|
-| 7 | `C` | Carry | Set on carry/borrow for arithmetic (`ADD`,`SUB`,`INC`,`DEC`,`CMP`). For `MUL`/`MUH`, set if result > 255. |
-| 6 | `H` | Half-Carry | Set on half-carry/borrow for `ADD`, `SUB`, `INC`, `DEC`, `CMP`. |
-| 5 | `V` | Overflow | Set on signed overflow for `ADD`, `SUB`, `INC`, `DEC`, `CMP`. |
-| 4 | `Z` | Zero | Set if the result is `0x00`. Affected by all operations except `NOP`. For `CMP`, reflects `A-B==0`. |
-| 3 | `G` | Greater Than| Set if `signed(A) > signed(B)`. **Note:** Checked on *every cycle* regardless of the operation. |
-| 2 | `E` | Equal | Set if `A = B`. **Note:** Checked on *every cycle* regardless of the operation. |
-| 1 | `R` | LSR/ASR Bit | Set to the value of `A[0]` during an `LSR` or `ASR` operation. |
-| 0 | `L` | LSL Bit | Set to the value of `A[7]` during an `LSL` operation. |
+| 7 | `C` | Carry/Borrow | Desbordamiento sin signo en sumas; préstamo en restas. Para `MUL`/`MUH`: si el producto > 255. |
+| 6 | `H` | Half-Carry/Borrow | Acarreo/préstamo en el nibble bajo (bits 3→4). |
+| 5 | `V` | Overflow | Desbordamiento con signo (complemento a 2). |
+| 4 | `Z` | Zero | El resultado es `0x00`. En `CMP` refleja `A-B == 0`. |
+| 3 | `G` | Greater | `signed(A) > signed(B)`. Calculado en **todas** las operaciones. |
+| 2 | `E` | Equal | `A = B`. Calculado en **todas** las operaciones. |
+| 1 | `R` | Bit desplazado (right) | Bit 0 de A desplazado en `LSR` y `ASR`. |
+| 0 | `L` | Bit desplazado (left) | Bit 7 de A desplazado en `LSL` y `ASL`. |
+
+---
+
+## Operaciones
+
+### Aritméticas
+
+| Mnemónico | Opcode (bin) | Opcode (hex) | Operación | Flags adicionales |
+|:---:|:---:|:---:|:---|:---|
+| `ADD`  | `00001` | `0x01` | `ACC ← A + B` | C, H, V, Z |
+| `ADC`  | `00010` | `0x02` | `ACC ← A + B + Cin` | C, H, V, Z |
+| `SUB`  | `00011` | `0x03` | `ACC ← A - B` | C(borrow), H(borrow), V, Z |
+| `SBB`  | `00100` | `0x04` | `ACC ← A - B - Cin` | C(borrow), H(borrow), V, Z |
+| `INC`  | `01001` | `0x09` | `ACC ← A + 1` | C, H, V, Z |
+| `DEC`  | `01010` | `0x0A` | `ACC ← A - 1` | C(borrow), H(borrow), V, Z |
+| `MUL`  | `10101` | `0x15` | `ACC ← (A × B)[7:0]` | C si producto > 255, Z |
+| `MUH`  | `10110` | `0x16` | `ACC ← (A × B)[15:8]` | C si byte alto ≠ 0, Z |
+
+### Desplazamiento y rotación
+
+| Mnemónico | Opcode (bin) | Opcode (hex) | Operación | Flags adicionales |
+|:---:|:---:|:---:|:---|:---|
+| `LSL`  | `00101` | `0x05` | `ACC ← A(6:0) & '0'` | L, Z |
+| `LSR`  | `00110` | `0x06` | `ACC ← '0' & A(7:1)` | R, Z |
+| `ROL`  | `00111` | `0x07` | `ACC ← A(6:0) & A(7)` | Z |
+| `ROR`  | `01000` | `0x08` | `ACC ← A(0) & A(7:1)` | Z |
+| `ASL`  | `01111` | `0x0F` | `ACC ← A(6:0) & '0'` (aritmético) | V si cambia signo, L, Z |
+| `ASR`  | `11000` | `0x18` | `ACC ← A(7) & A(7:1)` (aritmético) | R, Z |
+| `SWAP` | `11001` | `0x19` | `ACC ← A(3:0) & A(7:4)` | Z |
+
+> **ASL vs LSL:** producen el mismo resultado en bits, pero ASL activa el flag V cuando el bit de signo cambia (desbordamiento en multiplicación ×2 con signo).
+
+### Lógicas
+
+| Mnemónico | Opcode (bin) | Opcode (hex) | Operación | Flags adicionales |
+|:---:|:---:|:---:|:---|:---|
+| `AND`  | `01011` | `0x0B` | `ACC ← A AND B` | Z |
+| `OR`   | `01100` | `0x0C` | `ACC ← A OR B` | Z |
+| `XOR`  | `01101` | `0x0D` | `ACC ← A XOR B` | Z |
+| `NOT`  | `01110` | `0x0E` | `ACC ← NOT A` | Z |
+
+### Transferencia y control
+
+| Mnemónico | Opcode (bin) | Opcode (hex) | Operación | Flags adicionales |
+|:---:|:---:|:---:|:---|:---|
+| `NOP`  | `00000` | `0x00` | Sin operación | — |
+| `PA`   | `10001` | `0x11` | `ACC ← A` | Z |
+| `PB`   | `10010` | `0x12` | `ACC ← B` | Z |
+| `CL`   | `10011` | `0x13` | `ACC ← 0x00` | Z=1 |
+| `SET`  | `10100` | `0x14` | `ACC ← 0xFF` | Z=0 |
+| `CMP`  | `10111` | `0x17` | Compara A-B, ACC no cambia | C, H, V, Z |
+
+---
+
+## Convención Carry/Borrow en restas
+
+En operaciones de resta (`SUB`, `SBB`, `DEC`, `CMP`), el flag **C** sigue la convención:
+
+- `C = 1` → no hubo borrow (resultado ≥ 0 en aritm. signed extendida a 9 bits)
+- `C = 0` → hubo borrow (resultado < 0 en aritm. signed extendida a 9 bits)
+
+Esto es equivalente a `C = NOT borrow`, habitual en arquitecturas como ARM.
