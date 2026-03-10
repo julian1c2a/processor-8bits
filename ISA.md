@@ -328,8 +328,8 @@ ejecución; el ensamblador emite `addr_low` y `addr_high` del base.
 
 Todos son **relativos** (`PC ← PC + sign_ext(rel8)`), 2 bytes, no modifican flags.
 
-| Opcode | Mnemónico | Condición | Descripción                                  |
-|--------|-----------|-----------|----------------------------------------------|
+| Opcode | Mnemónico | Condición | Descripción                                   |
+|--------|-----------|-----------|-----------------------------------------------|
 | `0x80` | `BEQ`     | Z = 1     | Igual / resultado cero                        |
 | `0x81` | `BNE`     | Z = 0     | Distinto / resultado no cero                  |
 | `0x82` | `BCS`     | C = 1     | Carry set / sin préstamo (A ≥ B unsigned)     |
@@ -338,8 +338,8 @@ Todos son **relativos** (`PC ← PC + sign_ext(rel8)`), 2 bytes, no modifican fl
 | `0x85` | `BVC`     | V = 0     | Sin overflow signed                           |
 | `0x86` | `BGT`     | G = 1     | A > B con signo (tras CMP)                    |
 | `0x87` | `BLE`     | G = 0     | A ≤ B con signo (tras CMP)                    |
-| `0x88` | `BGE`     | G=1 ∨ E=1 | A ≥ B con signo                              |
-| `0x89` | `BLT`     | G=0 ∧ E=0 | A < B con signo                              |
+| `0x88` | `BGE`     | G=1 ∨ E=1 | A ≥ B con signo                               |
+| `0x89` | `BLT`     | G=0 ∧ E=0 | A < B con signo                               |
 | `0x8A` | `BHC`     | H = 1     | Half-carry set (útil para BCD)                |
 | `0x8B` | `BEQ2`    | E = 1     | A = B (comparación directa de operandos)      |
 
@@ -347,18 +347,18 @@ Todos son **relativos** (`PC ← PC + sign_ext(rel8)`), 2 bytes, no modifican fl
 
 ### 7.6 Operaciones ALU — Registro (A op B → A)
 
-| Opcode | Mnemónico  | Bytes | Operación ALU           | Flags modificados  |
-|--------|------------|-------|-------------------------|--------------------|
-| `0x90` | `ADD`      | 1     | A ← A + B               | C H V Z G E        |
-| `0x91` | `ADC`      | 1     | A ← A + B + C           | C H V Z G E        |
-| `0x92` | `SUB`      | 1     | A ← A − B               | C H V Z G E        |
-| `0x93` | `SBB`      | 1     | A ← A − B − C           | C H V Z G E        |
-| `0x94` | `AND`      | 1     | A ← A AND B             | Z G E              |
-| `0x95` | `OR`       | 1     | A ← A OR B              | Z G E              |
-| `0x96` | `XOR`      | 1     | A ← A XOR B             | Z G E              |
-| `0x97` | `CMP`      | 1     | flags ← A − B (A no cambia) | C H V Z G E   |
-| `0x98` | `MUL`      | 1     | A ← [A × B](7:0)        | C Z G E            |
-| `0x99` | `MUH`      | 1     | A ← [A × B](15:8)       | C Z G E            |
+| Opcode | Mnemónico  | Bytes | Operación ALU               | Flags modificados  |
+|--------|------------|-------|-----------------------------|--------------------|
+| `0x90` | `ADD`      | 1     | A ← A + B                   | C H V Z G E        |
+| `0x91` | `ADC`      | 1     | A ← A + B + C               | C H V Z G E        |
+| `0x92` | `SUB`      | 1     | A ← A − B                   | C H V Z G E        |
+| `0x93` | `SBB`      | 1     | A ← A − B − C               | C H V Z G E        |
+| `0x94` | `AND`      | 1     | A ← A AND B                 | Z G E              |
+| `0x95` | `OR`       | 1     | A ← A OR B                  | Z G E              |
+| `0x96` | `XOR`      | 1     | A ← A XOR B                 | Z G E              |
+| `0x97` | `CMP`      | 1     | flags ← A − B (A no cambia) | C H V Z G E        |
+| `0x98` | `MUL`      | 1     | A ← [A × B](7:0)            | C Z G E            |
+| `0x99` | `MUH`      | 1     | A ← [A × B](15:8)           | C Z G E            |
 
 ---
 
@@ -366,16 +366,16 @@ Todos son **relativos** (`PC ← PC + sign_ext(rel8)`), 2 bytes, no modifican fl
 
 *B no es modificado; el microcode usa un registro temporal interno.*
 
-| Opcode | Mnemónico      | Bytes | Operación ALU           | Flags modificados  |
-|--------|----------------|-------|-------------------------|--------------------|
-| `0xA0` | `ADD #n`       | 2     | A ← A + n               | C H V Z G E        |
-| `0xA1` | `ADC #n`       | 2     | A ← A + n + C           | C H V Z G E        |
-| `0xA2` | `SUB #n`       | 2     | A ← A − n               | C H V Z G E        |
-| `0xA3` | `SBB #n`       | 2     | A ← A − n − C           | C H V Z G E        |
-| `0xA4` | `AND #n`       | 2     | A ← A AND n             | Z G E              |
-| `0xA5` | `OR  #n`       | 2     | A ← A OR n              | Z G E              |
-| `0xA6` | `XOR #n`       | 2     | A ← A XOR n             | Z G E              |
-| `0xA7` | `CMP #n`       | 2     | flags ← A − n (A no cambia) | C H V Z G E   |
+| Opcode | Mnemónico      | Bytes | Operación ALU               | Flags modificados  |
+|--------|----------------|-------|-----------------------------|--------------------|
+| `0xA0` | `ADD #n`       | 2     | A ← A + n                   | C H V Z G E        |
+| `0xA1` | `ADC #n`       | 2     | A ← A + n + C               | C H V Z G E        |
+| `0xA2` | `SUB #n`       | 2     | A ← A − n                   | C H V Z G E        |
+| `0xA3` | `SBB #n`       | 2     | A ← A − n − C               | C H V Z G E        |
+| `0xA4` | `AND #n`       | 2     | A ← A AND n                 | Z G E              |
+| `0xA5` | `OR  #n`       | 2     | A ← A OR n                  | Z G E              |
+| `0xA6` | `XOR #n`       | 2     | A ← A XOR n                 | Z G E              |
+| `0xA7` | `CMP #n`       | 2     | flags ← A − n (A no cambia) | C H V Z G E        |
 
 ---
 
