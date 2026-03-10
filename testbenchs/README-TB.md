@@ -42,7 +42,7 @@ Cobertura por operación:
 | Binaria (dos operandos) | A ∈ [0,255], B ∈ [0,255] | 65 536 |
 | Con carry (ADC, SBB) | A ∈ [0,255], B ∈ [0,255], Cin ∈ {0,1} | 131 072 |
 
-Total: **~1.7 millones de vectores** para las 25 operaciones.
+Total: **~2.0 millones de vectores** para las 28 operaciones.
 
 ### Uso
 
@@ -93,7 +93,7 @@ todos los valores en decimal.
 
 ---
 
-## Operaciones verificadas (25/25 PASS)
+## Operaciones verificadas (28/28 PASS)
 
 | # | Operación | Vectores | Resultado |
 |:---:|:---:|---:|:---:|
@@ -122,3 +122,6 @@ todos los valores en decimal.
 | 23 | CMP | 65 536 | PASS |
 | 24 | ASR | 65 536 | PASS |
 | 25 | SWAP | 65 536 | PASS |
+| 26 | NEG | 65 536 | PASS |
+| 27 | INCB | 65 536 | PASS |
+| 28 | DECB | 65 536 | PASS |

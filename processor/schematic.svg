@@ -6,8 +6,8 @@
   <rect width="1400" height="1020" fill="#0d1117"/>
 
   <!-- ─────────────────────────── TITLE ─────────────────────────────── -->
-  <text x="700" y="30" text-anchor="middle" fill="#e6edf3" font-size="16" font-weight="bold">8-bit Processor — Micro-Architecture v0.5</text>
-  <text x="700" y="50" text-anchor="middle" fill="#8b949e" font-size="11">Nexys 7 100T · Artix-7 XC7A100T · 450 MHz · BRAM 1 cy · SRAM 5 cy</text>
+  <text x="700" y="30" text-anchor="middle" fill="#e6edf3" font-size="16" font-weight="bold">8-bit Processor — Micro-Architecture v0.6</text>
+  <text x="700" y="50" text-anchor="middle" fill="#8b949e" font-size="11">Nexys 7 100T · Artix-7 XC7A100T · 450 MHz · BRAM TDP · LR · RAS · SRAM 5 cy</text>
 
   <!-- ═══════════════════════════════════════════════════════════════════
        COLUMN LABELS
@@ -85,6 +85,14 @@
   <!-- Arrow MUX_ABUS → ABUS -->
   <line x1="255" y1="297" x2="255" y2="315" stroke="#58a6ff" stroke-width="1.2" marker-end="url(#arrowB)"/>
 
+  <!-- ─── RAS (Return Address Stack) — ADDRESS PATH, DECODE stage ─────── -->
+  <rect x="50" y="365" width="210" height="80" rx="6" fill="#161b22" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <text x="155" y="384" text-anchor="middle" fill="#58a6ff" font-weight="bold">RAS  (4 entries)</text>
+  <text x="155" y="400" text-anchor="middle" fill="#8b949e" font-size="10">4 × 16-bit flip-flops (64 b)</text>
+  <text x="155" y="416" text-anchor="middle" fill="#8b949e" font-size="10">Push: CALL / BSR</text>
+  <text x="155" y="430" text-anchor="middle" fill="#8b949e" font-size="9">Spec. PC on RET DECODE → 2 cy</text>
+  <text x="155" y="442" text-anchor="middle" fill="#8b949e" font-size="9">Port B confirms; miss → 3 cy</text>
+
   <!-- ═══════════════════════════════════════════════════════════════════
        PFQ  — Prefetch Queue (FETCH stage, DATA PATH column)
   ═══════════════════════════════════════════════════════════════════════ -->
@@ -126,6 +134,12 @@
   <text x="685" y="575" text-anchor="middle" fill="#3fb950" font-weight="bold">Reg B</text>
   <text x="685" y="591" text-anchor="middle" fill="#8b949e" font-size="10">8-bit index</text>
   <text x="685" y="606" text-anchor="middle" fill="#8b949e" font-size="10">WB target</text>
+
+  <!-- ─── LINK REGISTER (LR) ────────────────────────────────────────── -->
+  <rect x="740" y="555" width="100" height="60" rx="6" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="790" y="575" text-anchor="middle" fill="#58a6ff" font-weight="bold">LR</text>
+  <text x="790" y="591" text-anchor="middle" fill="#8b949e" font-size="10">16-bit link reg</text>
+  <text x="790" y="606" text-anchor="middle" fill="#8b949e" font-size="10">CALL/BSR → WB</text>
 
   <!-- ─── ALU (8-bit) ────────────────────────────────────────────────── -->
   <!-- Trapezoid shape approximated with polygon -->
@@ -197,23 +211,23 @@
        MEMORY / I/O COLUMN
   ═══════════════════════════════════════════════════════════════════════ -->
 
-  <!-- ─── BRAM (page zero + stack + ROM) ───────────────────────────────── -->
+  <!-- ─── BRAM TDP (page zero + stack + ROM) ─────────────────────────────── -->
   <rect x="990" y="90" width="370" height="140" rx="6" fill="#161b22" stroke="#d2a8ff" stroke-width="1.5"/>
-  <text x="1175" y="110" text-anchor="middle" fill="#d2a8ff" font-weight="bold">BRAM  (RAMB18 / RAMB36)</text>
-  <text x="1175" y="128" text-anchor="middle" fill="#8b949e" font-size="10">1-cycle latency @ 450 MHz</text>
+  <text x="1175" y="110" text-anchor="middle" fill="#d2a8ff" font-weight="bold">BRAM  TDP  (RAMB18 / RAMB36)</text>
+  <text x="1175" y="128" text-anchor="middle" fill="#8b949e" font-size="10">True Dual-Port · Port A: fetch/data · Port B: stack</text>
   <!-- sub-regions -->
   <rect x="1005" y="136" width="100" height="32" rx="3" fill="#21262d" stroke="#d2a8ff" stroke-width="1"/>
   <text x="1055" y="152" text-anchor="middle" fill="#d2a8ff" font-size="10">Page Zero</text>
-  <text x="1055" y="163" text-anchor="middle" fill="#8b949e" font-size="9">0x0000–0x00FF</text>
-  <rect x="1115" y="136" width="100" height="32" rx="3" fill="#21262d" stroke="#d2a8ff" stroke-width="1"/>
-  <text x="1165" y="152" text-anchor="middle" fill="#d2a8ff" font-size="10">Stack</text>
+  <text x="1055" y="163" text-anchor="middle" fill="#8b949e" font-size="9">0x0000–0x00FF (A)</text>
+  <rect x="1115" y="136" width="100" height="32" rx="3" fill="#21262d" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="1165" y="152" text-anchor="middle" fill="#58a6ff" font-size="10">Stack (Port B)</text>
   <text x="1165" y="163" text-anchor="middle" fill="#8b949e" font-size="9">SP init 0xFFFE ↓</text>
   <rect x="1225" y="136" width="120" height="32" rx="3" fill="#21262d" stroke="#d2a8ff" stroke-width="1"/>
   <text x="1285" y="152" text-anchor="middle" fill="#d2a8ff" font-size="10">Program ROM</text>
-  <text x="1285" y="163" text-anchor="middle" fill="#8b949e" font-size="9">BRAM as ROM</text>
-  <!-- speculation note -->
-  <text x="1175" y="208" text-anchor="middle" fill="#d29922" font-size="10">★  BRAM address speculated</text>
-  <text x="1175" y="221" text-anchor="middle" fill="#8b949e" font-size="9">at end of DECODE (1 cycle penalty avoided)</text>
+  <text x="1285" y="163" text-anchor="middle" fill="#8b949e" font-size="9">BRAM as ROM (A)</text>
+  <!-- TDP + speculation note -->
+  <text x="1175" y="208" text-anchor="middle" fill="#d29922" font-size="10">★  BRAM addr spec. + Port B push/pop en paralelo</text>
+  <text x="1175" y="221" text-anchor="middle" fill="#8b949e" font-size="9">CALL nn→4cy · CALL([nn])→6cy · RET→2cy · RTI→4cy</text>
 
   <!-- ─── SRAM + Wait-State Controller ─────────────────────────────────── -->
   <rect x="990" y="255" width="370" height="90" rx="6" fill="#161b22" stroke="#d2a8ff" stroke-width="1.5"/>
@@ -318,7 +332,7 @@
   <rect x="540" y="920" width="280" height="60" rx="6" fill="#161b22" stroke="#3fb950" stroke-width="1" stroke-dasharray="6,3"/>
   <text x="680" y="939" text-anchor="middle" fill="#3fb950" font-size="11" font-style="italic">(future)  R0–R7 Register File</text>
   <text x="680" y="956" text-anchor="middle" fill="#8b949e" font-size="9">8 × 8-bit general purpose registers</text>
-  <text x="680" y="969" text-anchor="middle" fill="#8b949e" font-size="9">Pending: §2 update, LD[PC+n], DBNZ</text>
+  <text x="680" y="969" text-anchor="middle" fill="#8b949e" font-size="9">Pending: LD[PC+n], DBNZ</text>
 
   <!-- ═══════════════════════════════════════════════════════════════════
        LEGEND
@@ -341,7 +355,7 @@
   <!-- dashed line legend -->
   <line x1="1005" y1="956" x2="1030" y2="956" stroke="#8b949e" stroke-width="1" stroke-dasharray="4,2"/>
   <text x="1035" y="960" fill="#8b949e" font-size="10">Feedback / speculation / future</text>
-  <text x="1005" y="975" fill="#8b949e" font-size="9">ISA v0.5 · GHDL LLVM · VHDL-2008 · 28 opcodes</text>
+  <text x="1005" y="975" fill="#8b949e" font-size="9">ISA v0.6 · GHDL LLVM · VHDL-2008 · 28 opcodes</text>
 
   <!-- ═══════════════════════════════════════════════════════════════════
        ARROWHEAD MARKERS
