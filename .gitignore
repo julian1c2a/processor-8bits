@@ -1,12 +1,14 @@
 *.o
+*.obj
 *.exe
 *.cf
-e~alu_tb.o
-e~alu_tb.exe
-e~alu_tb.cf
+*~alu_tb.o
+*~alu_tb.exe
+*~alu_tb.cf
 build/
 *.log
 *.lst
 *~*
 .*/
 testbenchs/vectors/
+build/

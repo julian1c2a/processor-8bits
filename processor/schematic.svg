@@ -1,0 +1,367 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1020" viewBox="0 0 1400 1020"
+     font-family="Consolas, 'Courier New', monospace" font-size="11">
+
+  <!-- ─────────────────────────── BACKGROUND ─────────────────────────── -->
+  <rect width="1400" height="1020" fill="#0d1117"/>
+
+  <!-- ─────────────────────────── TITLE ─────────────────────────────── -->
+  <text x="700" y="30" text-anchor="middle" fill="#e6edf3" font-size="16" font-weight="bold">8-bit Processor — Micro-Architecture v0.5</text>
+  <text x="700" y="50" text-anchor="middle" fill="#8b949e" font-size="11">Nexys 7 100T · Artix-7 XC7A100T · 450 MHz · BRAM 1 cy · SRAM 5 cy</text>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       COLUMN LABELS
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- ADDRESS PATH label -->
+  <text x="255" y="75" text-anchor="middle" fill="#58a6ff" font-size="12" font-weight="bold">ADDRESS PATH (16-bit)</text>
+  <!-- DATA PATH label -->
+  <text x="760" y="75" text-anchor="middle" fill="#3fb950" font-size="12" font-weight="bold">DATA PATH (8-bit)</text>
+  <!-- MEMORY label -->
+  <text x="1180" y="75" text-anchor="middle" fill="#d2a8ff" font-size="12" font-weight="bold">MEMORY / I/O</text>
+
+  <!-- ─── Divider lines ──────────────────────────────────────────────── -->
+  <line x1="510" y1="65" x2="510" y2="1005" stroke="#30363d" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="960" y1="65" x2="960" y2="1005" stroke="#30363d" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       STAGE LABELS (pipeline)
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <text x="8" y="200" fill="#8b949e" font-size="10" transform="rotate(-90,8,200)">FETCH / PFQ</text>
+  <text x="8" y="430" fill="#8b949e" font-size="10" transform="rotate(-90,8,430)">DECODE</text>
+  <text x="8" y="680" fill="#8b949e" font-size="10" transform="rotate(-90,8,680)">EXEC + WB</text>
+
+  <!-- Stage separators -->
+  <line x1="20" y1="308" x2="960" y2="308" stroke="#30363d" stroke-width="1" stroke-dasharray="6,3"/>
+  <line x1="20" y1="548" x2="960" y2="548" stroke="#30363d" stroke-width="1" stroke-dasharray="6,3"/>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       ██  BLOCK HELPERS  ██
+       All blocks: rounded rect + bold title + detail lines
+  ═══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- ─────────────────────────────────────────────────────────────────
+       PROGRAM COUNTER  (ADDRESS PATH)
+  ───────────────────────────────────────────────────────────────────── -->
+  <rect x="50" y="90" width="120" height="54" rx="6" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="110" y="109" text-anchor="middle" fill="#58a6ff" font-weight="bold">PC</text>
+  <text x="110" y="124" text-anchor="middle" fill="#8b949e" font-size="10">16-bit register</text>
+  <text x="110" y="136" text-anchor="middle" fill="#8b949e" font-size="10">PC_INC / PC_LOAD</text>
+
+  <!-- ─── STACK POINTER ─────────────────────────────────────────────── -->
+  <rect x="190" y="90" width="120" height="54" rx="6" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="250" y="109" text-anchor="middle" fill="#58a6ff" font-weight="bold">SP</text>
+  <text x="250" y="124" text-anchor="middle" fill="#8b949e" font-size="10">16-bit register</text>
+  <text x="250" y="136" text-anchor="middle" fill="#8b949e" font-size="10">SP±2  (even aligned)</text>
+
+  <!-- ─── EAR (Effective Address Register) ─────────────────────────── -->
+  <rect x="330" y="90" width="130" height="54" rx="6" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="395" y="109" text-anchor="middle" fill="#58a6ff" font-weight="bold">EAR</text>
+  <text x="395" y="124" text-anchor="middle" fill="#8b949e" font-size="10">Eff. Address Reg.</text>
+  <text x="395" y="136" text-anchor="middle" fill="#8b949e" font-size="10">16-bit latch</text>
+
+  <!-- ─── EA ADDER ───────────────────────────────────────────────────── -->
+  <rect x="50" y="170" width="410" height="64" rx="6" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="255" y="191" text-anchor="middle" fill="#58a6ff" font-weight="bold">EA Adder  (16-bit)</text>
+  <text x="255" y="207" text-anchor="middle" fill="#8b949e" font-size="10">base[15:0] + {0x00, B}   ←   [nn+B]  /  [n+B]  addressing</text>
+  <text x="255" y="221" text-anchor="middle" fill="#8b949e" font-size="10">Also used for ADD16/SUB16  (reuses adder as 16-bit ALU)</text>
+
+  <!-- Arrows from PC/SP/EAR down to EA Adder -->
+  <line x1="110" y1="144" x2="110" y2="170" stroke="#58a6ff" stroke-width="1.2" marker-end="url(#arrowB)"/>
+  <line x1="250" y1="144" x2="250" y2="170" stroke="#58a6ff" stroke-width="1.2" marker-end="url(#arrowB)"/>
+  <line x1="395" y1="144" x2="395" y2="170" stroke="#58a6ff" stroke-width="1.2" marker-end="url(#arrowB)"/>
+
+  <!-- ─── MUX_ABUS ──────────────────────────────────────────────────── -->
+  <rect x="50" y="255" width="410" height="42" rx="6" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="255" y="275" text-anchor="middle" fill="#58a6ff" font-weight="bold">MUX_ABUS</text>
+  <text x="255" y="290" text-anchor="middle" fill="#8b949e" font-size="10">ABUS_SEL[1:0]:  PC | SP | EAR | EA-adder-result</text>
+
+  <!-- Arrow EA Adder → MUX_ABUS -->
+  <line x1="255" y1="234" x2="255" y2="255" stroke="#58a6ff" stroke-width="1.2" marker-end="url(#arrowB)"/>
+
+  <!-- ─── ABUS[15:0] ─────────────────────────────────────────────────── -->
+  <rect x="50" y="315" width="900" height="22" rx="4" fill="#1c2128" stroke="#58a6ff" stroke-width="2"/>
+  <text x="500" y="331" text-anchor="middle" fill="#58a6ff" font-weight="bold" font-size="12">ABUS [15:0]  —  16-bit Address Bus</text>
+
+  <!-- Arrow MUX_ABUS → ABUS -->
+  <line x1="255" y1="297" x2="255" y2="315" stroke="#58a6ff" stroke-width="1.2" marker-end="url(#arrowB)"/>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PFQ  — Prefetch Queue (FETCH stage, DATA PATH column)
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <rect x="540" y="90" width="200" height="86" rx="6" fill="#161b22" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="640" y="109" text-anchor="middle" fill="#3fb950" font-weight="bold">PFQ  — Prefetch Queue</text>
+  <text x="640" y="125" text-anchor="middle" fill="#8b949e" font-size="10">2-byte FIFO:  PFQ[0], PFQ[1]</text>
+  <text x="640" y="140" text-anchor="middle" fill="#8b949e" font-size="10">valid[1:0]  —  autonomous refill</text>
+  <text x="640" y="155" text-anchor="middle" fill="#8b949e" font-size="10">PC auto-increments on each fetch</text>
+  <text x="640" y="168" text-anchor="middle" fill="#8b949e" font-size="10">Flushed on branch/JP taken</text>
+
+  <!-- ─── Instruction Decoder ─────────────────────────────────────────── -->
+  <rect x="540" y="360" width="200" height="76" rx="6" fill="#161b22" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="640" y="379" text-anchor="middle" fill="#3fb950" font-weight="bold">Instruction Decoder</text>
+  <text x="640" y="395" text-anchor="middle" fill="#8b949e" font-size="10">Reads PFQ[0] (opcode)</text>
+  <text x="640" y="410" text-anchor="middle" fill="#8b949e" font-size="10">Drives UC ROM address</text>
+  <text x="640" y="425" text-anchor="middle" fill="#8b949e" font-size="10">Emits BRAM addr @ end of DECODE</text>
+
+  <!-- Arrow PFQ → Decoder (down through ABUS row) -->
+  <line x1="640" y1="176" x2="640" y2="315" stroke="#3fb950" stroke-width="1.2"/>
+  <line x1="640" y1="315" x2="640" y2="360" stroke="#3fb950" stroke-width="1.2" marker-end="url(#arrowG)"/>
+
+  <!-- ─── PIPELINE REGISTER (DECODE → EXEC+WB) ──────────────────────── -->
+  <rect x="520" y="468" width="240" height="36" rx="5" fill="#21262d" stroke="#d29922" stroke-width="2"/>
+  <text x="640" y="483" text-anchor="middle" fill="#d29922" font-weight="bold" font-size="12">▶  Pipeline Register</text>
+  <text x="640" y="497" text-anchor="middle" fill="#8b949e" font-size="10">Latches: opcode, imm8, imm16, ABUS_SEL, ALU_OP, WB_SEL</text>
+
+  <!-- Arrow Decoder → Pipeline Reg -->
+  <line x1="640" y1="436" x2="640" y2="468" stroke="#d29922" stroke-width="1.5" marker-end="url(#arrowY)"/>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       ACCUMULATOR A  and  REGISTER B
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <rect x="540" y="555" width="90" height="60" rx="6" fill="#161b22" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="585" y="575" text-anchor="middle" fill="#3fb950" font-weight="bold">Acc A</text>
+  <text x="585" y="591" text-anchor="middle" fill="#8b949e" font-size="10">8-bit</text>
+  <text x="585" y="606" text-anchor="middle" fill="#8b949e" font-size="10">WB target</text>
+
+  <rect x="640" y="555" width="90" height="60" rx="6" fill="#161b22" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="685" y="575" text-anchor="middle" fill="#3fb950" font-weight="bold">Reg B</text>
+  <text x="685" y="591" text-anchor="middle" fill="#8b949e" font-size="10">8-bit index</text>
+  <text x="685" y="606" text-anchor="middle" fill="#8b949e" font-size="10">WB target</text>
+
+  <!-- ─── ALU (8-bit) ────────────────────────────────────────────────── -->
+  <!-- Trapezoid shape approximated with polygon -->
+  <polygon points="548,650 792,650 770,730 570,730" fill="#161b22" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="670" y="675" text-anchor="middle" fill="#3fb950" font-weight="bold" font-size="13">ALU  (8-bit combinational)</text>
+  <text x="670" y="692" text-anchor="middle" fill="#8b949e" font-size="10">ALU_OP[4:0]  —  28 operations</text>
+  <text x="670" y="707" text-anchor="middle" fill="#8b949e" font-size="10">Inputs: A, B (or Imm8 via MUX)</text>
+  <text x="670" y="722" text-anchor="middle" fill="#8b949e" font-size="10">Output: result[7:0] + Status[7:0]</text>
+
+  <!-- Arrows A, B → ALU -->
+  <line x1="585" y1="615" x2="585" y2="650" stroke="#3fb950" stroke-width="1.2" marker-end="url(#arrowG)"/>
+  <line x1="685" y1="615" x2="685" y2="650" stroke="#3fb950" stroke-width="1.2" marker-end="url(#arrowG)"/>
+
+  <!-- ─── FLAGS REGISTER ─────────────────────────────────────────────── -->
+  <rect x="540" y="750" width="280" height="48" rx="6" fill="#161b22" stroke="#f85149" stroke-width="1.5"/>
+  <text x="680" y="769" text-anchor="middle" fill="#f85149" font-weight="bold">Flags Register  F</text>
+  <text x="680" y="785" text-anchor="middle" fill="#8b949e" font-size="10">C H V Z G E R L  (8 bits — I separate)</text>
+  <text x="680" y="798" text-anchor="middle" fill="#8b949e" font-size="9">Updated end of EXEC; drives branch logic</text>
+
+  <!-- Arrow ALU → Flags -->
+  <line x1="670" y1="730" x2="670" y2="750" stroke="#f85149" stroke-width="1.2" marker-end="url(#arrowR)"/>
+
+  <!-- ─── MUX_WB (writeback mux) ─────────────────────────────────────── -->
+  <rect x="540" y="815" width="280" height="42" rx="4" fill="#161b22" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="680" y="834" text-anchor="middle" fill="#3fb950" font-weight="bold">MUX_WB</text>
+  <text x="680" y="849" text-anchor="middle" fill="#8b949e" font-size="10">WB_SEL[1:0]:  ALU result | MDR | Imm8 | SP byte</text>
+
+  <!-- Arrow ALU → MUX_WB (lateral) -->
+  <line x1="680" y1="730" x2="820" y2="836" stroke="#3fb950" stroke-width="1.0" stroke-dasharray="3,2"/>
+  <!-- Arrow MUX_WB → A -->
+  <line x1="585" y1="815" x2="585" y2="630" stroke="#3fb950" stroke-width="1.0" stroke-dasharray="3,2" marker-end="url(#arrowG)"/>
+
+  <!-- ─── FORWARDING BYPASS annotation ─────────────────────────────────── -->
+  <rect x="540" y="875" width="280" height="34" rx="4" fill="#1c2128" stroke="#d29922" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="680" y="893" text-anchor="middle" fill="#d29922" font-size="10">⟳  Forwarding bypass</text>
+  <text x="680" y="906" text-anchor="middle" fill="#8b949e" font-size="9">ALU result available to next instr. input (EXEC→EXEC)</text>
+
+  <!-- ─── MDR (Memory Data Register) ───────────────────────────────────── -->
+  <rect x="840" y="555" width="100" height="60" rx="6" fill="#161b22" stroke="#d2a8ff" stroke-width="1.5"/>
+  <text x="890" y="575" text-anchor="middle" fill="#d2a8ff" font-weight="bold">MDR</text>
+  <text x="890" y="591" text-anchor="middle" fill="#8b949e" font-size="10">8-bit D-latch</text>
+  <text x="890" y="606" text-anchor="middle" fill="#8b949e" font-size="10">MDR_OE / WE</text>
+
+  <!-- ─── DBUS[7:0] ──────────────────────────────────────────────────── -->
+  <rect x="540" y="338" width="410" height="18" rx="3" fill="#1c2128" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="745" y="351" text-anchor="middle" fill="#3fb950" font-weight="bold" font-size="11">DBUS [7:0]  —  8-bit Data Bus</text>
+
+  <!-- Arrow MDR ↔ DBUS (up) -->
+  <line x1="890" y1="555" x2="890" y2="356" stroke="#d2a8ff" stroke-width="1.2"/>
+  <line x1="890" y1="356" x2="950" y2="356" stroke="#d2a8ff" stroke-width="1.2" marker-end="url(#arrowP)"/>
+
+  <!-- Arrow DBUS → MDR (read from bus) -->
+  <line x1="950" y1="347" x2="890" y2="347" stroke="#3fb950" stroke-width="1.0" stroke-dasharray="3,2"/>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       MICROCODE UC
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <rect x="840" y="360" width="110" height="90" rx="6" fill="#161b22" stroke="#d29922" stroke-width="1.5"/>
+  <text x="895" y="379" text-anchor="middle" fill="#d29922" font-weight="bold">UC</text>
+  <text x="895" y="395" text-anchor="middle" fill="#8b949e" font-size="10">Microcode ROM</text>
+  <text x="895" y="410" text-anchor="middle" fill="#8b949e" font-size="10">+ Sequencer</text>
+  <text x="895" y="425" text-anchor="middle" fill="#8b949e" font-size="9">Addr: opcode[7:0]</text>
+  <text x="895" y="440" text-anchor="middle" fill="#8b949e" font-size="9">Out: control word</text>
+
+  <!-- Arrow Decoder → UC -->
+  <line x1="740" y1="398" x2="840" y2="398" stroke="#d29922" stroke-width="1.2" marker-end="url(#arrowY)"/>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       MEMORY / I/O COLUMN
+  ═══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- ─── BRAM (page zero + stack + ROM) ───────────────────────────────── -->
+  <rect x="990" y="90" width="370" height="140" rx="6" fill="#161b22" stroke="#d2a8ff" stroke-width="1.5"/>
+  <text x="1175" y="110" text-anchor="middle" fill="#d2a8ff" font-weight="bold">BRAM  (RAMB18 / RAMB36)</text>
+  <text x="1175" y="128" text-anchor="middle" fill="#8b949e" font-size="10">1-cycle latency @ 450 MHz</text>
+  <!-- sub-regions -->
+  <rect x="1005" y="136" width="100" height="32" rx="3" fill="#21262d" stroke="#d2a8ff" stroke-width="1"/>
+  <text x="1055" y="152" text-anchor="middle" fill="#d2a8ff" font-size="10">Page Zero</text>
+  <text x="1055" y="163" text-anchor="middle" fill="#8b949e" font-size="9">0x0000–0x00FF</text>
+  <rect x="1115" y="136" width="100" height="32" rx="3" fill="#21262d" stroke="#d2a8ff" stroke-width="1"/>
+  <text x="1165" y="152" text-anchor="middle" fill="#d2a8ff" font-size="10">Stack</text>
+  <text x="1165" y="163" text-anchor="middle" fill="#8b949e" font-size="9">SP init 0xFFFE ↓</text>
+  <rect x="1225" y="136" width="120" height="32" rx="3" fill="#21262d" stroke="#d2a8ff" stroke-width="1"/>
+  <text x="1285" y="152" text-anchor="middle" fill="#d2a8ff" font-size="10">Program ROM</text>
+  <text x="1285" y="163" text-anchor="middle" fill="#8b949e" font-size="9">BRAM as ROM</text>
+  <!-- speculation note -->
+  <text x="1175" y="208" text-anchor="middle" fill="#d29922" font-size="10">★  BRAM address speculated</text>
+  <text x="1175" y="221" text-anchor="middle" fill="#8b949e" font-size="9">at end of DECODE (1 cycle penalty avoided)</text>
+
+  <!-- ─── SRAM + Wait-State Controller ─────────────────────────────────── -->
+  <rect x="990" y="255" width="370" height="90" rx="6" fill="#161b22" stroke="#d2a8ff" stroke-width="1.5"/>
+  <text x="1175" y="275" text-anchor="middle" fill="#d2a8ff" font-weight="bold">SRAM  IS61WV102416BLL</text>
+  <text x="1175" y="292" text-anchor="middle" fill="#8b949e" font-size="10">10 ns async · 512 K × 16 bit</text>
+  <text x="1175" y="308" text-anchor="middle" fill="#8b949e" font-size="10">5 cycles @ 450 MHz  (4 wait states)</text>
+  <!-- Wait State Controller -->
+  <rect x="1005" y="316" width="340" height="22" rx="3" fill="#21262d" stroke="#d29922" stroke-width="1"/>
+  <text x="1175" y="331" text-anchor="middle" fill="#d29922" font-size="10">Wait-State Controller  —  inserts 4 stall cycles</text>
+
+  <!-- ─── I/O SPACE ─────────────────────────────────────────────────── -->
+  <rect x="990" y="365" width="370" height="110" rx="6" fill="#161b22" stroke="#ffa657" stroke-width="1.5"/>
+  <text x="1175" y="385" text-anchor="middle" fill="#ffa657" font-weight="bold">I/O Space  (256 ports, 8-bit)</text>
+  <text x="1175" y="401" text-anchor="middle" fill="#8b949e" font-size="10">IO_SEL  —  separate from MEM_SEL</text>
+  <!-- sub-blocks -->
+  <rect x="1005" y="410" width="80" height="28" rx="3" fill="#21262d" stroke="#ffa657" stroke-width="1"/>
+  <text x="1045" y="422" text-anchor="middle" fill="#ffa657" font-size="9">UART0</text>
+  <text x="1045" y="433" text-anchor="middle" fill="#8b949e" font-size="8">0x00–0x04</text>
+  <rect x="1095" y="410" width="80" height="28" rx="3" fill="#21262d" stroke="#ffa657" stroke-width="1"/>
+  <text x="1135" y="422" text-anchor="middle" fill="#ffa657" font-size="9">UART1</text>
+  <text x="1135" y="433" text-anchor="middle" fill="#8b949e" font-size="8">0x05–0x09</text>
+  <rect x="1185" y="410" width="80" height="28" rx="3" fill="#21262d" stroke="#ffa657" stroke-width="1"/>
+  <text x="1225" y="422" text-anchor="middle" fill="#ffa657" font-size="9">TMR0/1</text>
+  <text x="1225" y="433" text-anchor="middle" fill="#8b949e" font-size="8">0x10–0x28</text>
+  <rect x="1275" y="410" width="74" height="28" rx="3" fill="#21262d" stroke="#ffa657" stroke-width="1"/>
+  <text x="1312" y="422" text-anchor="middle" fill="#ffa657" font-size="9">IMR/IFR</text>
+  <text x="1312" y="433" text-anchor="middle" fill="#8b949e" font-size="8">0x30–0x35</text>
+  <text x="1175" y="467" text-anchor="middle" fill="#8b949e" font-size="9">IN/OUT instructions: opcodes 0xD0–0xD3</text>
+
+  <!-- ─── INTERRUPT CONTROLLER ──────────────────────────────────────── -->
+  <rect x="990" y="495" width="370" height="70" rx="6" fill="#161b22" stroke="#f85149" stroke-width="1.5"/>
+  <text x="1175" y="515" text-anchor="middle" fill="#f85149" font-weight="bold">Interrupt Controller</text>
+  <text x="1175" y="531" text-anchor="middle" fill="#8b949e" font-size="10">IRQ (maskable, I-flag) · NMI (non-maskable)</text>
+  <text x="1175" y="547" text-anchor="middle" fill="#8b949e" font-size="10">Vectors: 0xFFFE (IRQ) · 0xFFFA (NMI)</text>
+  <text x="1175" y="558" text-anchor="middle" fill="#8b949e" font-size="9">IMR[3:0]: UART1 · TMR1 · TMR0 · UART0</text>
+
+  <!-- ─── MMCM / PLL ─────────────────────────────────────────────────── -->
+  <rect x="990" y="590" width="175" height="56" rx="6" fill="#161b22" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="1077" y="610" text-anchor="middle" fill="#58a6ff" font-weight="bold">MMCM / PLL</text>
+  <text x="1077" y="626" text-anchor="middle" fill="#8b949e" font-size="10">100 MHz ref → 450 MHz</text>
+  <text x="1077" y="638" text-anchor="middle" fill="#8b949e" font-size="9">Artix-7 MMCME2_ADV</text>
+
+  <!-- ─── MEMORY MAP LEGEND ─────────────────────────────────────────── -->
+  <rect x="990" y="665" width="370" height="130" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="1175" y="685" text-anchor="middle" fill="#8b949e" font-weight="bold" font-size="11">Memory Map</text>
+  <text x="1005" y="703" fill="#d2a8ff" font-size="10">0x0000–0x00FF</text>
+  <text x="1155" y="703" fill="#8b949e" font-size="10">Page Zero  (BRAM, fast)</text>
+  <text x="1005" y="719" fill="#d2a8ff" font-size="10">0x0100–0xFFF9</text>
+  <text x="1155" y="719" fill="#8b949e" font-size="10">General RAM/ROM</text>
+  <text x="1005" y="735" fill="#d2a8ff" font-size="10">0xFFFA–0xFFFB</text>
+  <text x="1155" y="735" fill="#8b949e" font-size="10">NMI vector</text>
+  <text x="1005" y="751" fill="#d2a8ff" font-size="10">0xFFFC–0xFFFD</text>
+  <text x="1155" y="751" fill="#8b949e" font-size="10">Reserved</text>
+  <text x="1005" y="767" fill="#d2a8ff" font-size="10">0xFFFE–0xFFFF</text>
+  <text x="1155" y="767" fill="#8b949e" font-size="10">IRQ vector</text>
+  <text x="1005" y="785" fill="#ffa657" font-size="10">I/O:  0x00–0xFF</text>
+  <text x="1155" y="785" fill="#8b949e" font-size="10">256 ports (IN/OUT only)</text>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       BUS CONNECTIONS (ABUS / DBUS to memory)
+  ═══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- ABUS → BRAM -->
+  <line x1="950" y1="326" x2="990" y2="160" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrowB)"/>
+  <!-- ABUS → SRAM -->
+  <line x1="950" y1="326" x2="990" y2="300" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrowB)"/>
+  <!-- ABUS → IO -->
+  <line x1="950" y1="326" x2="990" y2="415" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrowB)"/>
+
+  <!-- DBUS ↔ BRAM -->
+  <line x1="950" y1="351" x2="990" y2="170" stroke="#3fb950" stroke-width="1.2" marker-end="url(#arrowG)"/>
+  <!-- DBUS ↔ SRAM -->
+  <line x1="950" y1="351" x2="990" y2="280" stroke="#3fb950" stroke-width="1.2" marker-end="url(#arrowG)"/>
+  <!-- DBUS ↔ IO -->
+  <line x1="950" y1="351" x2="990" y2="390" stroke="#3fb950" stroke-width="1.2" marker-end="url(#arrowG)"/>
+
+  <!-- ─── BRAM speculation arrow from Decoder ──────────────────────── -->
+  <line x1="740" y1="390" x2="990" y2="205" stroke="#d29922" stroke-width="1.0" stroke-dasharray="5,3" marker-end="url(#arrowY)"/>
+  <text x="870" y="278" fill="#d29922" font-size="9" transform="rotate(-20,870,278)">speculation addr</text>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       STACK BUS (16-bit, separate)
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <rect x="50" y="920" width="410" height="30" rx="4" fill="#1c2128" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="255" y="940" text-anchor="middle" fill="#58a6ff" font-size="11">Stack Bus  [15:0]  —  16-bit parallel  (SP ±2, even aligned)</text>
+
+  <!-- SP → Stack Bus -->
+  <line x1="250" y1="144" x2="250" y2="920" stroke="#58a6ff" stroke-width="1.0" stroke-dasharray="3,2"/>
+
+  <!-- Stack Bus → BRAM (stack region) -->
+  <line x1="460" y1="935" x2="1165" y2="168" stroke="#58a6ff" stroke-width="1.0" stroke-dasharray="3,2" marker-end="url(#arrowB)"/>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PIPELINE STAGE ANNOTATION BOX
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <rect x="30" y="555" width="500" height="22" rx="3" fill="#21262d" stroke="#d29922" stroke-width="1"/>
+  <text x="280" y="570" text-anchor="middle" fill="#d29922" font-size="10">EXEC + WB Stage  ─────────────────────────────────────────────</text>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       REGISTER FILE (future R0–R7)
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <rect x="540" y="920" width="280" height="60" rx="6" fill="#161b22" stroke="#3fb950" stroke-width="1" stroke-dasharray="6,3"/>
+  <text x="680" y="939" text-anchor="middle" fill="#3fb950" font-size="11" font-style="italic">(future)  R0–R7 Register File</text>
+  <text x="680" y="956" text-anchor="middle" fill="#8b949e" font-size="9">8 × 8-bit general purpose registers</text>
+  <text x="680" y="969" text-anchor="middle" fill="#8b949e" font-size="9">Pending: §2 update, LD[PC+n], DBNZ</text>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       LEGEND
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <rect x="990" y="815" width="370" height="165" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="1175" y="834" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="bold">Legend</text>
+  <!-- color swatches -->
+  <rect x="1005" y="843" width="14" height="10" fill="#58a6ff" rx="2"/>
+  <text x="1025" y="852" fill="#8b949e" font-size="10">Address Path (16-bit)</text>
+  <rect x="1005" y="861" width="14" height="10" fill="#3fb950" rx="2"/>
+  <text x="1025" y="870" fill="#8b949e" font-size="10">Data Path (8-bit)</text>
+  <rect x="1005" y="879" width="14" height="10" fill="#d2a8ff" rx="2"/>
+  <text x="1025" y="888" fill="#8b949e" font-size="10">Memory / BRAM / SRAM</text>
+  <rect x="1005" y="897" width="14" height="10" fill="#ffa657" rx="2"/>
+  <text x="1025" y="906" fill="#8b949e" font-size="10">I/O Space</text>
+  <rect x="1005" y="915" width="14" height="10" fill="#d29922" rx="2"/>
+  <text x="1025" y="924" fill="#8b949e" font-size="10">Control / Pipeline / UC</text>
+  <rect x="1005" y="933" width="14" height="10" fill="#f85149" rx="2"/>
+  <text x="1025" y="942" fill="#8b949e" font-size="10">Flags / Interrupts</text>
+  <!-- dashed line legend -->
+  <line x1="1005" y1="956" x2="1030" y2="956" stroke="#8b949e" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="1035" y="960" fill="#8b949e" font-size="10">Feedback / speculation / future</text>
+  <text x="1005" y="975" fill="#8b949e" font-size="9">ISA v0.5 · GHDL LLVM · VHDL-2008 · 28 opcodes</text>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       ARROWHEAD MARKERS
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <defs>
+    <marker id="arrowB" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#58a6ff"/>
+    </marker>
+    <marker id="arrowG" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#3fb950"/>
+    </marker>
+    <marker id="arrowY" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#d29922"/>
+    </marker>
+    <marker id="arrowR" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#f85149"/>
+    </marker>
+    <marker id="arrowP" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#d2a8ff"/>
+    </marker>
+  </defs>
+
+</svg>
