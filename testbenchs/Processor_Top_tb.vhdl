@@ -139,7 +139,7 @@ begin
     -- Proceso de Estímulo
     stim_proc: process
     begin
-        report "=== INICIO SIMULACION PROCESADOR (Test ADD16) ===";
+        report "=== INICIO SIMULACION PROCESADOR (Test Overflow Flag) ===";
         
         -- Reset del sistema
         reset <= '1';
@@ -151,23 +151,28 @@ begin
         wait for clk_period * 60;
 
         report "--- Verificación ---";
-        -- Al final, PC debe estar en 0x000E (HALT en 0x000D + 1)
-        assert MemAddress = x"000E"
-            report "FAIL: El PC final no es correcto. Esperado 0x000E, obtenido: 0x" & to_hstring(MemAddress)
+        -- Al final, PC debe estar en 0x001F (HALT en 0x001E + 1)
+        assert MemAddress = x"001F"
+            report "FAIL: El PC final no es correcto. Esperado 0x001F, obtenido: 0x" & to_hstring(MemAddress)
             severity error;
             
-        -- 1. A (Alto) = 0x10 + 0x01 = 0x11
-        assert RAM(16#0100#) = x"11"
-            report "FAIL: ADD16 High (A) incorrecto. Esperado 0x11, Leído: 0x" & to_hstring(RAM(16#0100#))
+        -- 1. Overflow Positivo: 0x7F + 0x01 = 0x80
+        assert RAM(16#0100#) = x"80"
+            report "FAIL: Suma overflow positivo incorrecta. Esperado 0x80, Leído: 0x" & to_hstring(RAM(16#0100#))
             severity error;
 
-        -- 2. B (Bajo) = 0x20 + 0x01 = 0x21
-        assert RAM(16#0101#) = x"21"
-            report "FAIL: ADD16 Low (B) incorrecto. Esperado 0x21, Leído: 0x" & to_hstring(RAM(16#0101#))
+        -- 2. Overflow Negativo: 0x80 + 0xFF = 0x7F
+        assert RAM(16#0101#) = x"7F"
+            report "FAIL: Suma overflow negativo incorrecta. Esperado 0x7F, Leído: 0x" & to_hstring(RAM(16#0101#))
             severity error;
 
-        if (MemAddress = x"000E") and (RAM(16#0100#) = x"11") and (RAM(16#0101#) = x"21") then
-            report "PASS: Instrucción ADD16 verificada.";
+        -- 3. Sin Overflow: 0x01 + 0x01 = 0x02
+        assert RAM(16#0102#) = x"02"
+            report "FAIL: Suma sin overflow incorrecta. Esperado 0x02, Leído: 0x" & to_hstring(RAM(16#0102#))
+            severity error;
+
+        if (MemAddress = x"001F") and (RAM(16#0100#) = x"80") and (RAM(16#0101#) = x"7F") and (RAM(16#0102#) = x"02") then
+            report "PASS: Flag de Overflow (V) verificado correctamente.";
         end if;
 
         report "=== FIN DE SIMULACION ===";
