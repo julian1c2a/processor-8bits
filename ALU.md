@@ -7,6 +7,7 @@ Implementación de una Unidad Aritmético-Lógica de 8 bits en VHDL (VHDL-2008).
 | Archivo | Descripción |
 |---|---|
 | `processor/ALU.vhdl` | Implementación de la ALU |
+| `processor/ALU_functions_pkg.vhdl` | Funciones puras para operaciones aritméticas y lógicas |
 | `processor/ALU_pkg.vhdl` | Package con las constantes de opcodes |
 | `testbenchs/ALU_tb.vhdl` | Testbench manual (casos de prueba seleccionados) |
 | `testbenchs/ALU_exhaustive_tb.vhdl` | Testbench exhaustivo (lee vectores desde CSV) |
@@ -19,12 +20,12 @@ Implementación de una Unidad Aritmético-Lógica de 8 bits en VHDL (VHDL-2008).
 ```vhdl
 entity ALU is
     Port (
-        RegInA    : in  STD_LOGIC_VECTOR(7 downto 0);  -- Operando A
-        RegInB    : in  STD_LOGIC_VECTOR(7 downto 0);  -- Operando B
-        Oper      : in  STD_LOGIC_VECTOR(4 downto 0);  -- Código de operación
+        RegInA    : in  data_vector;   -- Operando A (R0)
+        RegInB    : in  data_vector;   -- Operando B (R0..R7 vía Mux)
+        Oper      : in  opcode_vector; -- Código de operación
         Carry_in  : in  STD_LOGIC := '0';              -- Carry/Borrow entrada (ADC, SBB)
-        RegOutACC : out STD_LOGIC_VECTOR(7 downto 0);  -- Resultado (Acumulador)
-        RegStatus : out STD_LOGIC_VECTOR(7 downto 0)   -- Flags de estado
+        RegOutACC : out data_vector;   -- Resultado (Acumulador)
+        RegStatus : out status_vector  -- Flags de estado
     );
 end entity ALU;
 ```

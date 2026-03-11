@@ -1,3 +1,18 @@
+--------------------------------------------------------------------------------
+-- Entidad: DataPath
+-- Descripción:
+--   Implementa el camino de datos de 8 bits del procesador.
+--   Contiene:
+--     - Banco de Registros Unificado (8x8): R0 actúa como Acumulador (A).
+--     - ALU: Realiza operaciones aritmético-lógicas.
+--     - MDR: Registro de datos de memoria para sincronización.
+--     - Lógica de Flags: Gestión de estado con escritura enmascarada.
+--
+--   Características clave:
+--     - Permite usar cualquier registro (R0..R7) como operando B de la ALU.
+--     - Doble puerto de escritura lógico (Write_A para R0, Write_B para R_Sel).
+--------------------------------------------------------------------------------
+
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
@@ -36,10 +51,14 @@ architecture unique of DataPath is
 
     for all : ALU_comp use entity work.ALU(unique);
 
-    -- Definición del Banco de Registros (8 registros de 8 bits)
+    -- -------------------------------------------------------------------------
+    -- Banco de Registros (Register File)
+    -- -------------------------------------------------------------------------
+    -- Se define como un array de vectores.
+    -- Inicialización a 0 para simulación limpia.
     signal Registers : register_file_t := (others => (others => '0'));
 
-    -- Alias para mantener compatibilidad con lógica existente de A y B
+    -- Alias semánticos: R0 es siempre el Acumulador (A), R1 es el registro B por defecto
     alias RegA is Registers(0);
     alias RegB is Registers(1);
 
@@ -55,6 +74,9 @@ architecture unique of DataPath is
 
 begin
 
+    -- =========================================================================
+    -- 1. Instancia de la ALU
+    -- =========================================================================
     -- 1. Instancia de la ALU
     -- Nota: Carry_in necesita lógica especial (puede venir de F(7) o ser 0 o 1)
     -- Por ahora lo conectamos al flag C actual para operaciones aritméticas
@@ -68,11 +90,15 @@ begin
         RegStatus => ALU_Stat
     );
 
-    -- Multiplexor para la entrada B de la ALU (selecciona R0..R7)
-    -- Por defecto, la UC pondrá 1 (RegB) para instrucciones estándar
+    -- MUX Entrada B ALU:
+    -- Permite flexibilidad total: ALU puede operar A con cualquier Rn.
     ALU_OpB <= Registers(to_register_index(Reg_Sel));
 
-    -- 2. Multiplexor de Write-Back (Qué dato escribimos en los registros)
+    -- =========================================================================
+    -- 2. Lógica de Write-Back (Escritura en Registros)
+    -- =========================================================================
+    
+    -- MUX Write-Back: Selecciona la fuente de datos a escribir en el banco de registros.
     -- Esto implementa la lógica de selección de fuente
     process(Bus_Op, ALU_Res, MDR)
     begin
@@ -83,37 +109,46 @@ begin
         end case;
     end process;
 
-    -- 3. Banco de Registros (A, B, Flags)
+    -- Proceso secuencial: Actualización de registros en flanco de reloj
     process(clk, reset)
     begin
         if reset = '1' then
             Registers <= (others => (others => '0'));
             RegF <= (others => '0');
+            MDR  <= (others => '0');
         elsif rising_edge(clk) then
-            -- Escritura A
+            
+            -- Escritura en Acumulador (A / R0)
+            -- Prioridad o independencia: Write_A siempre afecta a R0.
             if Write_A = '1' then
                 RegA <= Bus_Int;
             end if;
 
             -- Escritura en Registro General (R0..R7 seleccionado por Reg_Sel)
+            -- Permite escribir resultados en registros auxiliares.
             if Write_B = '1' then
                 Registers(to_register_index(Reg_Sel)) <= Bus_Int;
             end if;
 
-            -- Escritura Flags (Status)
+            -- Gestión de Flags (Registro F)
+            -- Usa 'Flag_Mask' para permitir actualizaciones parciales (ej. instrucciones
+            -- que solo afectan a Z pero no a C).
             if Write_F = '1' then
                 -- Actualización con máscara: (Old and NOT Mask) OR (New and Mask)
                 RegF <= apply_flag_mask(RegF, ALU_Stat, Flag_Mask);
             end if;
 
             -- Escritura MDR (Captura de dato de memoria)
+            -- Buffer de entrada para desacoplar el tiempo de acceso a memoria.
             if MDR_WE = '1' then
                 MDR <= MemDataIn;
             end if;
         end if;
     end process;
 
-    -- 4. Salidas
+    -- =========================================================================
+    -- 3. Salidas del DataPath
+    -- =========================================================================
     -- Selección de dato a escribir en memoria (ST A o ST B)
     MemDataOut <= RegA when Out_Sel = '0' else RegB;
     

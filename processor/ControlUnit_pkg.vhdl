@@ -1,3 +1,11 @@
+--------------------------------------------------------------------------------
+-- Paquete: ControlUnit_pkg
+-- Descripción:
+--   Define los tipos de datos y registros para la Unidad de Control.
+--   Contiene el registro 'control_bus_t' que agrupa TODAS las señales de control
+--   físicas que van hacia el DataPath, AddressPath y Memoria.
+--------------------------------------------------------------------------------
+
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use work.CONSTANTS_pkg.ALL;
@@ -7,8 +15,9 @@ use work.AddressPath_pkg.ALL;
 
 package ControlUnit_pkg is
 
-    -- Registro de control agrupado (Control Word)
-    -- Contiene todas las señales que la UC envía al resto del procesador (DataPath + AddressPath)
+    -- =========================================================================
+    -- Type: control_bus_t (Palabra de Control)
+    -- =========================================================================
     type control_bus_t is record
         -- === DATA PATH ===
         ALU_Op      : opcode_vector;                -- Operación de la ALU
@@ -38,8 +47,11 @@ package ControlUnit_pkg is
         IO_RE       : std_logic;                    -- Read Enable I/O
     end record;
 
-    -- Valor de reinicio / NOP seguro para el bus de control
-    -- Útil para inicializar señales o para estados de espera
+    -- =========================================================================
+    -- Constante: INIT_CTRL_BUS
+    -- =========================================================================
+    -- Define un estado "seguro" o NOP por defecto para todas las señales.
+    -- Se usa en el reset y como base para construir microinstrucciones.
     constant INIT_CTRL_BUS : control_bus_t := (
         -- Data Path
         ALU_Op      => OP_NOP,

@@ -1,3 +1,13 @@
+--------------------------------------------------------------------------------
+-- Entidad: AddressPath
+-- Descripción:
+--   Camino de datos de 16 bits para gestión de direcciones.
+--   Contiene:
+--     - Registros: PC (Program Counter), SP (Stack Pointer), LR (Link Reg).
+--     - Sumador EA: Calcula direcciones efectivas (Base + Índice).
+--     - Lógica de incremento/decremento para PC y SP.
+--------------------------------------------------------------------------------
+
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
@@ -51,7 +61,7 @@ architecture Behavioral of AddressPath is
 begin
 
     -- ========================================================================
-    -- 1. Lógica Combinacional: EA Adder (Sumador de Direcciones)
+    -- 1. Sumador EA (Effective Address Adder)
     -- ========================================================================
     -- Calcula: Base (TMP) + Índice (B extendido)
     -- Sirve para: [nn+B], Saltos relativos (PC + rel8), etc.

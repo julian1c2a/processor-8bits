@@ -1,3 +1,13 @@
+--------------------------------------------------------------------------------
+-- Entidad: ALU
+-- Descripción:
+--   Unidad Aritmético-Lógica de 8 bits.
+--   Implementa todas las operaciones definidas en la ISA (aritméticas, lógicas,
+--   desplazamientos, etc.) de forma combinacional.
+--   Utiliza 'ALU_functions_pkg' para delegar la lógica compleja y mantener
+--   este archivo limpio y estructural.
+--------------------------------------------------------------------------------
+
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
@@ -20,6 +30,9 @@ architecture unique of ALU is
 
 begin
 
+    -- =========================================================================
+    -- Proceso Principal de la ALU
+    -- =========================================================================
     alu_process: process(RegInA, RegInB, Oper, Carry_in)
         variable res : alu_result_record;
         variable mul_res       : unsigned_double_data_vector;

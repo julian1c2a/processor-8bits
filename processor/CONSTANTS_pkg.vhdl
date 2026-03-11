@@ -1,9 +1,20 @@
+--------------------------------------------------------------------------------
+-- Archivo: CONSTANTS_pkg.vhdl
+-- Descripción:
+--   Define las constantes globales de dimensionamiento y arquitectura del sistema.
+--   Centraliza los anchos de bus y parámetros fundamentales para facilitar
+--   la escalabilidad y el mantenimiento.
+--
+-- Dependencias: Utils_pkg (para funciones matemáticas como ceil_log2)
+--------------------------------------------------------------------------------
+
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use work.Utils_pkg.ALL;
 
 package CONSTANTS_pkg is
 
+    -- =========================================================================
     -- Constantes de dimensionamiento del sistema (Base)
     constant DATA_WIDTH    : integer := 8;
     constant ADDRESS_WIDTH : integer := 16;
@@ -13,6 +24,7 @@ package CONSTANTS_pkg is
     constant DOUBLE_DATA_WIDTH : integer := DATA_WIDTH * 2;
     constant EXTENDED_DATA_WIDTH : integer := DATA_WIDTH + 1;
     constant EXTENDED_NIBBLE_WIDTH : integer := NIBBLE_WIDTH + 1;
+    -- Número de registros de propósito general en el DataPath (incluyendo A y B)
     constant NUM_REGISTERS : integer := 8;
 
     -- Constantes derivadas para rangos (MSB)

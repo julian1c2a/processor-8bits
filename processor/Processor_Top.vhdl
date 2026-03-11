@@ -1,3 +1,15 @@
+--------------------------------------------------------------------------------
+-- Entidad: Processor_Top
+-- Descripción:
+--   Nivel superior (Top Level) del procesador de 8 bits.
+--   Integra y conecta los tres subsistemas principales:
+--     1. Control Unit (Cerebro)
+--     2. Data Path (Ejecución 8-bit)
+--     3. Address Path (Direccionamiento 16-bit)
+--
+--   Expone la interfaz de memoria y E/S hacia el exterior (FPGA/Testbench).
+--------------------------------------------------------------------------------
+
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use work.CONSTANTS_pkg.ALL;
@@ -31,7 +43,9 @@ architecture Structural of Processor_Top is
     for all : AddressPath_comp use entity work.AddressPath(Behavioral);
     for all : ControlUnit_comp use entity work.ControlUnit(Behavioral);
 
-    -- Internal Signals
+    -- =========================================================================
+    -- Señales de Interconexión Interna
+    -- =========================================================================
     signal s_CtrlBus    : control_bus_t;
     signal s_Flags      : status_vector;
     signal s_AddressBus : address_vector;
