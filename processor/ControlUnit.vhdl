@@ -127,7 +127,8 @@ architecture unique of ControlUnit is
         
         S_EXEC_JP_1,    -- JP nn: Leer byte bajo
         S_EXEC_JP_2,    -- JP nn: Leer byte alto
-        S_EXEC_JP_3     -- JP nn: Cargar PC
+        S_EXEC_JP_3,    -- JP nn: Cargar PC
+        S_EXEC_JP_AB    -- JP A:B: Cargar PC desde registros
     );
 
     signal state, next_state : state_type;
@@ -413,6 +414,10 @@ begin
                     when x"73" =>
                         v_ctrl.Load_TMP_L := '1';
                         next_state <= S_EXEC_ADDR_FETCH_HI;
+
+                    -- JP A:B (0x74)
+                    when x"74" =>
+                        next_state <= S_EXEC_JP_AB;
 
                     -- CALL ([nn]) (0x76)
                     when x"76" =>
@@ -732,6 +737,16 @@ begin
             when S_EXEC_CALL_6 =>
                 -- 6. Cargar PC con destino (TMP)
                 v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP
+                v_ctrl.PC_Op        := PC_OP_LOAD;
+                next_state          <= S_FETCH;
+
+            -- -----------------------------------------------------------------
+            -- EJECUCIÓN: JP A:B (0x74)
+            -- -----------------------------------------------------------------
+            when S_EXEC_JP_AB =>
+                v_ctrl.EA_A_Sel     := EA_A_SRC_REG_AB; -- Base = A:B
+                v_ctrl.EA_B_Sel     := EA_B_SRC_ZERO;   -- Índice = 0
+                v_ctrl.Load_Src_Sel := '0'; -- Fuente = EA Adder Result
                 v_ctrl.PC_Op        := PC_OP_LOAD;
                 next_state          <= S_FETCH;
 
