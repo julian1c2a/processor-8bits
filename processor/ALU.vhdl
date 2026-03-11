@@ -75,24 +75,24 @@ begin
             when OP_LSL | OP_LSR | OP_ROL | OP_ROR | OP_ASL | OP_ASR =>
                 res := do_shift(Oper, RegInA);
                 -- do_shift no ve B, así que recalculamos G y E externos
-                if signed(RegInA) > signed(RegInB) then res.status(3) := '1'; end if; -- G
-                if RegInA = RegInB then res.status(2) := '1'; end if; -- E
+                if get_sig_data(RegInA) > get_sig_data(RegInB) then res.status(idx_fG) := '1'; end if; -- G
+                if RegInA = RegInB then res.status(idx_fE) := '1'; end if; -- E
 
             -- Multiplicación
             when OP_MUL => 
-                mul_res := unsigned(RegInA) * unsigned(RegInB);
+                mul_res := get_uns_data(RegInA) * get_uns_data(RegInB);
                 res.acc := get_slv_low_data_from_double(mul_res);
                 res.status := calc_common_flags(res.acc, RegInA, RegInB);
                 if is_high_data_nonzero(mul_res) then 
-                    res.status(7) := '1'; -- C si la parte alta no es cero
+                    res.status(idx_fC) := '1'; -- C si la parte alta no es cero
                 end if;
 
             when OP_MUH => 
-                mul_res := unsigned(RegInA) * unsigned(RegInB);
+                mul_res := get_uns_data(RegInA) * get_uns_data(RegInB);
                 res.acc := get_slv_high_data_from_double(mul_res);
                 res.status := calc_common_flags(res.acc, RegInA, RegInB);
                 if is_high_data_nonzero(mul_res) then 
-                    res.status(7) := '1'; -- C
+                    res.status(idx_fC) := '1'; -- C
                 end if;
 
             when others => -- Opcodes reservados (11100–11111): salida = 0x00

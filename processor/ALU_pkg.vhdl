@@ -15,6 +15,7 @@ package ALU_pkg is
     subtype nibble_data is std_logic_vector(MSB_NIBBLE downto 0);
 
     subtype unsigned_data_vector is unsigned(MSB_DATA downto 0);
+    subtype signed_data_vector is signed(MSB_DATA downto 0);
     subtype unsigned_address_vector is unsigned(MSB_ADDRESS downto 0);
     subtype unsigned_nibble is unsigned(MSB_NIBBLE downto 0);
 
@@ -32,6 +33,16 @@ package ALU_pkg is
         acc    : data_vector;
         status : status_vector;
     end record;
+
+    -- Índices de los flags en RegStatus (C, H, V, Z, G, E, R, L)
+    constant idx_fC : integer := 7; -- Carry / Borrow
+    constant idx_fH : integer := 6; -- Half-Carry
+    constant idx_fV : integer := 5; -- Overflow
+    constant idx_fZ : integer := 4; -- Zero
+    constant idx_fG : integer := 3; -- Greater
+    constant idx_fE : integer := 2; -- Equal
+    constant idx_fR : integer := 1; -- Rotated/Shifted bit (Right)
+    constant idx_fL : integer := 0; -- Rotated/Shifted bit (Left)
 
     constant OP_NOP  : opcode_vector := b"00000"; -- No Operation
     constant OP_ADD  : opcode_vector := b"00001"; -- ADD
