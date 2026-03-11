@@ -45,6 +45,8 @@ architecture unique of ControlUnit is
         S_EXEC_ALU_IMM_1, -- ALU A, #n: Fetch inmediato
         S_EXEC_ALU_IMM_2, -- ALU A, #n: Execute & Write Back
         
+        S_EXEC_ALU_UNARY, -- Operaciones unarias ALU (Shift, Rotate, etc.)
+        
         S_EXEC_PUSH_1,    -- PUSH: Decrementar SP
         S_EXEC_PUSH_2,    -- PUSH: Escribir byte bajo
         S_EXEC_PUSH_3,    -- PUSH: Escribir byte alto (0x00)
@@ -238,6 +240,11 @@ begin
                     when x"A0" | x"A2" | x"A4" | x"A5" | x"A7" =>
                         next_state <= S_EXEC_ALU_IMM_1;
 
+                    -- Shift/Rotate Ops (A)
+                    -- LSL(0xC8), LSR(0xC9), ASL(0xCA), ASR(0xCB), ROL(0xCC), ROR(0xCD)
+                    when x"C8" | x"C9" | x"CA" | x"CB" | x"CC" | x"CD" =>
+                        next_state <= S_EXEC_ALU_UNARY;
+
                     -- Saltos Condicionales (0x80 - 0x8B)
                     when x"80" | x"81" | x"82" | x"83" | x"84" | x"85" | 
                          x"86" | x"87" | x"88" | x"89" | x"8A" | x"8B" =>
@@ -402,6 +409,27 @@ begin
                     when x"A4" => v_ctrl.ALU_Op := OP_AND; v_ctrl.Flag_Mask := x"1C";
                     when x"A5" => v_ctrl.ALU_Op := OP_IOR; v_ctrl.Flag_Mask := x"1C";
                     when x"A7" => v_ctrl.ALU_Op := OP_CMP; v_ctrl.Flag_Mask := x"FF"; v_ctrl.Write_A := '0'; -- CMP #n (No escribe A)
+                    when others => null;
+                end case;
+                next_state <= S_FETCH;
+
+            -- -----------------------------------------------------------------
+            -- EJECUCIÓN: ALU Unaria (Shift/Rotate A)
+            -- -----------------------------------------------------------------
+            when S_EXEC_ALU_UNARY =>
+                -- Operaciones que solo implican A.
+                -- Bus_Op=ACC_ALU, Write_A=1, Write_F=1.
+                v_ctrl.Bus_Op  := ACC_ALU_elected;
+                v_ctrl.Write_A := '1';
+                v_ctrl.Write_F := '1';
+                
+                case r_IR is
+                    when x"C8" => v_ctrl.ALU_Op := OP_LSL; v_ctrl.Flag_Mask := x"11"; -- Z, L
+                    when x"C9" => v_ctrl.ALU_Op := OP_LSR; v_ctrl.Flag_Mask := x"12"; -- Z, R
+                    when x"CA" => v_ctrl.ALU_Op := OP_ASL; v_ctrl.Flag_Mask := x"31"; -- Z, L, V
+                    when x"CB" => v_ctrl.ALU_Op := OP_ASR; v_ctrl.Flag_Mask := x"12"; -- Z, R
+                    when x"CC" => v_ctrl.ALU_Op := OP_ROL; v_ctrl.Flag_Mask := x"10"; -- Z
+                    when x"CD" => v_ctrl.ALU_Op := OP_ROR; v_ctrl.Flag_Mask := x"10"; -- Z
                     when others => null;
                 end case;
                 next_state <= S_FETCH;

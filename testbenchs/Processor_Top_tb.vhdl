@@ -38,42 +38,51 @@ architecture unique of Processor_Top_tb is
     
     -- Inicialización de la memoria con un PROGRAMA DE PRUEBA
     signal RAM : ram_type := (
-        -- TEST: Página Cero [n] e Indirecto [B]
-        -- 1. LD A, [0x10]      ; Carga 0xAA desde dir 0x0010 (Pág Cero)
-        -- 2. ST A, [0x20]      ; Guarda 0xAA en dir 0x0020 (Pág Cero)
-        -- 3. LD B, #0x20       ; B = 0x20
-        -- 4. LD A, [B]         ; Carga desde [0x00:B] = 0x0020 -> A = 0xAA
-        -- 5. INC A             ; A = 0xAB
-        -- 6. LD B, #0x30       ; B = 0x30
-        -- 7. ST A, [B]         ; Guarda 0xAB en [0x0030]
-        -- 8. HALT
+        -- TEST: Rotación y Desplazamiento (Shift/Rotate)
+        -- 1. LSL:  0x01 -> 0x02.  Guardar en 0x0100.
+        -- 2. LSR:  0x80 -> 0x40.  Guardar en 0x0101.
+        -- 3. ASR:  0x80 -> 0xC0.  Guardar en 0x0102.
+        -- 4. ROL:  0x80 -> 0x01.  Guardar en 0x0103.
+        -- 5. ROR:  0x01 -> 0x80.  Guardar en 0x0104.
         
-        -- 0x0000: LD A, [0x10]
-        16#0000# => x"12", 16#0001# => x"10",
-        
-        -- 0x0002: ST A, [0x20]
-        16#0002# => x"30", 16#0003# => x"20",
-        
-        -- 0x0004: LD B, #0x20
-        16#0004# => x"21", 16#0005# => x"20",
-        
-        -- 0x0006: LD A, [B]
-        16#0006# => x"14",
-        
-        -- 0x0007: INC A (0xC2)
-        16#0007# => x"C2",
-        
-        -- 0x0008: LD B, #0x30
-        16#0008# => x"21", 16#0009# => x"30",
-        
-        -- 0x000A: ST A, [B]
-        16#000A# => x"32",
-        
-        -- 0x000B: HALT
-        16#000B# => x"01",
+        -- 0x0000: LD A, #0x01
+        16#0000# => x"11", 16#0001# => x"01",
+        -- 0x0002: LSL A (0xC8)
+        16#0002# => x"C8",
+        -- 0x0003: ST A, [0x0100]
+        16#0003# => x"31", 16#0004# => x"00", 16#0005# => x"01",
 
-        -- Dato inicial
-        16#0010# => x"AA",
+        -- 0x0006: LD A, #0x80
+        16#0006# => x"11", 16#0007# => x"80",
+        -- 0x0008: LSR A (0xC9)
+        16#0008# => x"C9",
+        -- 0x0009: ST A, [0x0101]
+        16#0009# => x"31", 16#000A# => x"01", 16#000B# => x"01",
+
+        -- 0x000C: LD A, #0x80
+        16#000C# => x"11", 16#000D# => x"80",
+        -- 0x000E: ASR A (0xCB)
+        16#000E# => x"CB",
+        -- 0x000F: ST A, [0x0102]
+        16#000F# => x"31", 16#0010# => x"02", 16#0011# => x"01",
+
+        -- 0x0012: LD A, #0x80
+        16#0012# => x"11", 16#0013# => x"80",
+        -- 0x0014: ROL A (0xCC)
+        16#0014# => x"CC",
+        -- 0x0015: ST A, [0x0103]
+        16#0015# => x"31", 16#0016# => x"03", 16#0017# => x"01",
+
+        -- 0x0018: LD A, #0x01
+        16#0018# => x"11", 16#0019# => x"01",
+        -- 0x001A: ROR A (0xCD)
+        16#001A# => x"CD",
+        -- 0x001B: ST A, [0x0104]
+        16#001B# => x"31", 16#001C# => x"04", 16#001D# => x"01",
+
+        -- 0x001E: HALT
+        16#001E# => x"01",
+        
         
         others => x"00" -- Resto a 0 (NOP)
     );
@@ -127,7 +136,7 @@ begin
     -- Proceso de Estímulo
     stim_proc: process
     begin
-        report "=== INICIO SIMULACION PROCESADOR (Test Página Cero/Indirecto) ===";
+        report "=== INICIO SIMULACION PROCESADOR (Test Rotacion/Desplazamiento) ===";
         
         -- Reset del sistema
         reset <= '1';
@@ -139,28 +148,42 @@ begin
         wait for clk_period * 50;
 
         report "--- Verificación ---";
-        -- Al final, PC debe estar en 0x000C (HALT en 0x000B + 1)
-        assert MemAddress = x"000C"
-            report "FAIL: El PC final no es correcto. Esperado 0x000C, obtenido: 0x" & to_hstring(MemAddress)
+        -- Al final, PC debe estar en 0x001F (HALT en 0x001E + 1)
+        assert MemAddress = x"001F"
+            report "FAIL: El PC final no es correcto. Esperado 0x001F, obtenido: 0x" & to_hstring(MemAddress)
             severity error;
             
-        -- Verificación de escritura en 0x0020 (ST A, [0x20]) -> 0xAA
-        -- Verificación de escritura en 0x0030 (ST A, [B])    -> 0xAB
-        assert RAM(16#0030#) = x"AB"
-            report "FAIL: Escritura indirecta incorrecta en 0x0030. Esperado 0xAB, Leído: 0x" & to_hstring(RAM(16#0030#))
+        -- LSL: 0x01 << 1 = 0x02
+        assert RAM(16#0100#) = x"02"
+            report "FAIL: LSL incorrecto. Esperado 0x02, Leído: 0x" & to_hstring(RAM(16#0100#))
             severity error;
 
-        if (MemAddress = x"000C") and (RAM(16#0030#) = x"AB") then
-            report "PASS: Direccionamiento PZ e Indirecto verificados.";
+        -- LSR: 0x80 >> 1 = 0x40
+        assert RAM(16#0101#) = x"40"
+            report "FAIL: LSR incorrecto. Esperado 0x40, Leído: 0x" & to_hstring(RAM(16#0101#))
+            severity error;
+
+        -- ASR: 0x80 (signed -128) >> 1 = 0xC0 (signed -64)
+        assert RAM(16#0102#) = x"C0"
+            report "FAIL: ASR incorrecto. Esperado 0xC0, Leído: 0x" & to_hstring(RAM(16#0102#))
+            severity error;
+
+        -- ROL: 0x80 rot 1 = 0x01
+        assert RAM(16#0103#) = x"01"
+            report "FAIL: ROL incorrecto. Esperado 0x01, Leído: 0x" & to_hstring(RAM(16#0103#))
+            severity error;
+
+        -- ROR: 0x01 rot 1 = 0x80
+        assert RAM(16#0104#) = x"80"
+            report "FAIL: ROR incorrecto. Esperado 0x80, Leído: 0x" & to_hstring(RAM(16#0104#))
+            severity error;
+
+        if (MemAddress = x"001F") and (RAM(16#0100#) = x"02") and (RAM(16#0101#) = x"40") and (RAM(16#0102#) = x"C0") and (RAM(16#0103#) = x"01") and (RAM(16#0104#) = x"80") then
+            report "PASS: Operaciones de Shift/Rotate verificadas.";
         end if;
 
         report "=== FIN DE SIMULACION ===";
         std.env.stop; -- Detener la simulación en GHDL
     end process;
-            severity note;
 
-        report "=== FIN DE SIMULACION ===";
-        std.env.stop; -- Detener la simulación en GHDL
-    end process;
-
-end architecture Behavioral;
+end architecture unique;
