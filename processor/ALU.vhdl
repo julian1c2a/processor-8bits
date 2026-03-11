@@ -2,6 +2,8 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 use work.ALU_pkg.ALL;
+use work.CONSTANTS_pkg.ALL;
+use work.ALU_functions_pkg.ALL;
 
 entity ALU is
     Port (
@@ -16,109 +18,11 @@ end entity ALU;
 
 architecture unique of ALU is
 
-    -------------------------------------------------------------------------
-    -- Funciones auxiliares puras
-    -------------------------------------------------------------------------
-
-    -- Calcula flags comunes: Zero (Z), Greater (G), Equal (E)
-    function calc_common_flags(res : data_vector; opA, opB : data_vector) return status_vector is
-        variable st : status_vector := (others => '0');
-    begin
-        if signed(res) = 0 then st(4) := '1'; end if; -- Z
-        if signed(opA) > signed(opB) then st(3) := '1'; end if; -- G
-        if opA = opB then st(2) := '1'; end if; -- E
-        return st;
-    end function;
-
-    -- Suma Genérica (soporta ADD, ADC, INC)
-    function do_add(opA, opB : data_vector; cin : std_logic) return alu_result_record is
-        variable ret : alu_result_record;
-        variable full9 : signed(8 downto 0);
-        variable nibble_res : unsigned(4 downto 0);
-    begin
-        -- Cálculo principal (9 bits)
-        full9 := resize(signed(opA), 9) + resize(signed(opB), 9) + resize(unsigned'('0' & cin), 9);
-        ret.acc := std_logic_vector(full9(7 downto 0));
-        
-        -- Flags base
-        ret.status := calc_common_flags(ret.acc, opA, opB);
-        ret.status(7) := full9(8); -- C (Carry)
-        
-        -- Half-Carry
-        nibble_res := resize(unsigned(opA(3 downto 0)), 5) + resize(unsigned(opB(3 downto 0)), 5) + unsigned'('0' & cin);
-        ret.status(6) := nibble_res(4); -- H
-
-        -- Overflow (V): Pos+Pos=Neg o Neg+Neg=Pos
-        if opA(7) = opB(7) and ret.acc(7) /= opA(7) then
-            ret.status(5) := '1';
-        end if;
-        
-        return ret;
-    end function;
-
-    -- Resta Genérica (soporta SUB, SBB, DEC, NEG, CMP)
-    function do_sub(opA, opB : data_vector; cin : std_logic) return alu_result_record is
-        variable ret : alu_result_record;
-        variable full9 : signed(8 downto 0);
-        variable nibble_res : unsigned(4 downto 0);
-    begin
-        -- Cálculo principal
-        full9 := resize(signed(opA), 9) - resize(signed(opB), 9) - resize(unsigned'('0' & cin), 9);
-        ret.acc := std_logic_vector(full9(7 downto 0));
-
-        -- Flags base
-        ret.status := calc_common_flags(ret.acc, opA, opB);
-        ret.status(7) := not full9(8); -- C (Not Borrow)
-        
-        -- Half-Borrow
-        nibble_res := resize(unsigned(opA(3 downto 0)), 5) - resize(unsigned(opB(3 downto 0)), 5) - unsigned'('0' & cin);
-        ret.status(6) := not nibble_res(4); -- H
-
-        -- Overflow (V): Pos-Neg=Neg o Neg-Pos=Pos
-        if opA(7) /= opB(7) and ret.acc(7) = opB(7) then
-            ret.status(5) := '1';
-        end if;
-
-        return ret;
-    end function;
-
-    -- Operaciones de Desplazamiento y Rotación
-    function do_shift(op : opcode_vector; val : data_vector) return alu_result_record is
-        variable ret : alu_result_record;
-    begin
-        ret.status := (others => '0'); -- Se sobrescribirá luego
-        case op is
-            when OP_LSL => -- Logical Left
-                ret.acc := val(6 downto 0) & '0';
-                ret.status(0) := val(7); -- L
-            when OP_LSR => -- Logical Right
-                ret.acc := '0' & val(7 downto 1);
-                ret.status(1) := val(0); -- R
-            when OP_ROL => -- Rotate Left
-                ret.acc := val(6 downto 0) & val(7);
-            when OP_ROR => -- Rotate Right
-                ret.acc := val(0) & val(7 downto 1);
-            when OP_ASL => -- Arithmetic Left
-                ret.acc := val(6 downto 0) & '0';
-                ret.status(0) := val(7); -- L
-                if val(7) /= ret.acc(7) then ret.status(5) := '1'; end if; -- V
-            when OP_ASR => -- Arithmetic Right
-                ret.acc := val(7) & val(7 downto 1);
-                ret.status(1) := val(0); -- R
-            when others => 
-                ret.acc := val;
-        end case;
-        
-        -- Flags comunes (solo Z es relevante aquí, G y E dependen de entradas originales A y B en wrapper)
-        if signed(ret.acc) = 0 then ret.status(4) := '1'; end if;
-        return ret;
-    end function;
-
 begin
 
     alu_process: process(RegInA, RegInB, Oper, Carry_in)
         variable res : alu_result_record;
-        variable mul_res       : unsigned(15 downto 0);
+        variable mul_res       : unsigned_double_data_vector;
         
         -- Constantes para reutilización
         constant ONE  : data_vector := x"01";
@@ -164,7 +68,7 @@ begin
             when OP_PSA => res.acc := RegInA; res.status := calc_common_flags(res.acc, RegInA, RegInB);
             when OP_PSB => res.acc := RegInB; res.status := calc_common_flags(res.acc, RegInA, RegInB);
             when OP_SWP => 
-                res.acc := RegInA(3 downto 0) & RegInA(7 downto 4);
+                res.acc := get_slv_low_nibble(RegInA) & get_slv_high_nibble(RegInA);
                 res.status := calc_common_flags(res.acc, RegInA, RegInB);
 
             -- Desplazamientos: delegamos en do_shift, y añadimos G y E
@@ -177,15 +81,19 @@ begin
             -- Multiplicación
             when OP_MUL => 
                 mul_res := unsigned(RegInA) * unsigned(RegInB);
-                res.acc := std_logic_vector(mul_res(7 downto 0));
+                res.acc := get_slv_low_data_from_double(mul_res);
                 res.status := calc_common_flags(res.acc, RegInA, RegInB);
-                if mul_res(15 downto 8) /= x"00" then res.status(7) := '1'; end if; -- C
+                if is_high_data_nonzero(mul_res) then 
+                    res.status(7) := '1'; -- C si la parte alta no es cero
+                end if;
 
             when OP_MUH => 
                 mul_res := unsigned(RegInA) * unsigned(RegInB);
-                res.acc := std_logic_vector(mul_res(15 downto 8));
+                res.acc := get_slv_high_data_from_double(mul_res);
                 res.status := calc_common_flags(res.acc, RegInA, RegInB);
-                if mul_res(15 downto 8) /= x"00" then res.status(7) := '1'; end if; -- C
+                if is_high_data_nonzero(mul_res) then 
+                    res.status(7) := '1'; -- C
+                end if;
 
             when others => -- Opcodes reservados (11100–11111): salida = 0x00
                 null;

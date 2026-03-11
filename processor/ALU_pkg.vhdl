@@ -1,15 +1,31 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+use work.CONSTANTS_pkg.ALL;
 
 -- Package con las constantes de opcodes de la ALU.
 -- Usado tanto por los testbenches exhaustivos como por el testbench manual.
 package ALU_pkg is
 
     -- Tipos globales del sistema
-    subtype data_vector is std_logic_vector(7 downto 0);
-    subtype address_vector is std_logic_vector(15 downto 0);
-    subtype opcode_vector is std_logic_vector(4 downto 0);
-    subtype status_vector is std_logic_vector(7 downto 0);
+    subtype data_vector is std_logic_vector(MSB_DATA downto 0);
+    subtype address_vector is std_logic_vector(MSB_ADDRESS downto 0);
+    subtype opcode_vector is std_logic_vector(MSB_OPCODE downto 0);
+    subtype status_vector is std_logic_vector(MSB_STATUS downto 0);
+    subtype nibble_data is std_logic_vector(MSB_NIBBLE downto 0);
+
+    subtype unsigned_data_vector is unsigned(MSB_DATA downto 0);
+    subtype unsigned_address_vector is unsigned(MSB_ADDRESS downto 0);
+    subtype unsigned_nibble is unsigned(MSB_NIBBLE downto 0);
+
+    subtype signed_extended_data_vector is signed(MSB_EXTENDED_DATA downto 0);
+    subtype unsigned_extended_nibble is unsigned(MSB_EXTENDED_NIBBLE downto 0);
+
+    -- Tipos para resultados de doble ancho (Multiplicación 16 bits)
+    subtype double_data_vector is std_logic_vector(MSB_DOUBLE_DATA downto 0);
+    subtype unsigned_double_data_vector is unsigned(MSB_DOUBLE_DATA downto 0);
+    subtype unsigned_double_data_vector_H is unsigned(MSB_DOUBLE_DATA downto DATA_WIDTH);
+    subtype unsigned_double_data_vector_L is unsigned(MSB_DATA downto 0);
 
     -- Tipo de retorno para funciones de la ALU: par (Valor, Flags)
     type alu_result_record is record
