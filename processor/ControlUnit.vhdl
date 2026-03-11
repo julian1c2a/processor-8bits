@@ -307,8 +307,8 @@ begin
                         next_state <= S_EXEC_ALU_IMM_1;
 
                     -- Shift/Rotate Ops (A)
-                    -- Unary ops on A: NOT,NEG,INC,DEC,Shifts,Rotates
-                    when x"C0" | x"C1" | x"C2" | x"C3" | x"C8" | x"C9" | x"CA" | x"CB" | x"CC" | x"CD" =>
+                    -- Unary ops: NOT,NEG,INC,DEC,Shifts,Rotates, CLR, SET, SWAP
+                    when x"C0" | x"C1" | x"C2" | x"C3" | x"C4" | x"C5" | x"C6" | x"C7" | x"C8" | x"C9" | x"CA" | x"CB" | x"CC" | x"CD" | x"CE" =>
                         next_state <= S_EXEC_ALU_UNARY;
 
                     -- Saltos Condicionales (0x80 - 0x8B)
@@ -341,6 +341,10 @@ begin
                     when x"60" =>
                         next_state <= S_EXEC_PUSH_1;
 
+                    -- PUSH B (0x61)
+                    when x"61" =>
+                        next_state <= S_EXEC_PUSH_1;
+
                     -- PUSH F (0x62)
                     when x"62" =>
                         next_state <= S_EXEC_PUSH_1;
@@ -351,6 +355,10 @@ begin
 
                     -- POP A (0x64)
                     when x"64" =>
+                        next_state <= S_EXEC_POP_1;
+
+                    -- POP B (0x65)
+                    when x"65" =>
                         next_state <= S_EXEC_POP_1;
 
                     -- POP F (0x66)
@@ -505,23 +513,35 @@ begin
             -- EJECUCIÓN: ALU Unaria (Shift/Rotate A)
             -- -----------------------------------------------------------------
             when S_EXEC_ALU_UNARY =>
-                -- Operaciones que solo implican A.
-                -- Bus_Op=ACC_ALU, Write_A=1, Write_F=1.
+                -- Operaciones unarias (sobre A o B).
+                -- Bus_Op=ACC_ALU, Write_F=1.
                 v_ctrl.Bus_Op  := ACC_ALU_elected;
-                v_ctrl.Write_A := '1';
                 v_ctrl.Write_F := '1';
+
+                -- Escribir en B si es INC B o DEC B, sino en A
+                if r_IR = x"C4" or r_IR = x"C5" then
+                    v_ctrl.Write_B := '1';
+                    v_ctrl.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH)); -- R1 (B)
+                else
+                    v_ctrl.Write_A := '1';
+                end if;
                 
                 case r_IR is
                     when x"C0" => v_ctrl.ALU_Op := OP_NOT; v_ctrl.Flag_Mask := x"10"; -- Z
                     when x"C1" => v_ctrl.ALU_Op := OP_NEG; v_ctrl.Flag_Mask := x"F0"; -- C,H,V,Z
                     when x"C2" => v_ctrl.ALU_Op := OP_INC; v_ctrl.Flag_Mask := x"F0"; -- C,H,V,Z
                     when x"C3" => v_ctrl.ALU_Op := OP_DEC; v_ctrl.Flag_Mask := x"F0"; -- C,H,V,Z
+                    when x"C4" => v_ctrl.ALU_Op := OP_INB; v_ctrl.Flag_Mask := x"F0"; -- C,H,V,Z (INC B)
+                    when x"C5" => v_ctrl.ALU_Op := OP_DEB; v_ctrl.Flag_Mask := x"F0"; -- C,H,V,Z (DEC B)
+                    when x"C6" => v_ctrl.ALU_Op := OP_CLR; v_ctrl.Flag_Mask := x"10"; -- Z
+                    when x"C7" => v_ctrl.ALU_Op := OP_SET; v_ctrl.Flag_Mask := x"10"; -- Z
                     when x"C8" => v_ctrl.ALU_Op := OP_LSL; v_ctrl.Flag_Mask := x"11"; -- Z, L
                     when x"C9" => v_ctrl.ALU_Op := OP_LSR; v_ctrl.Flag_Mask := x"12"; -- Z, R
                     when x"CA" => v_ctrl.ALU_Op := OP_ASL; v_ctrl.Flag_Mask := x"31"; -- Z, L, V
                     when x"CB" => v_ctrl.ALU_Op := OP_ASR; v_ctrl.Flag_Mask := x"12"; -- Z, R
                     when x"CC" => v_ctrl.ALU_Op := OP_ROL; v_ctrl.Flag_Mask := x"10"; -- Z
                     when x"CD" => v_ctrl.ALU_Op := OP_ROR; v_ctrl.Flag_Mask := x"10"; -- Z
+                    when x"CE" => v_ctrl.ALU_Op := OP_SWP; v_ctrl.Flag_Mask := x"10"; -- Z
                     when others => null;
                 end case;
                 next_state <= S_FETCH;
@@ -542,6 +562,8 @@ begin
                 v_ctrl.SP_Offset := '0';       -- Dir = SP
                 if r_IR = x"62" then -- PUSH F
                     v_ctrl.Out_Sel := OUT_SEL_F; -- Dato = RegF
+                elsif r_IR = x"61" then -- PUSH B
+                    v_ctrl.Out_Sel := OUT_SEL_B; -- Dato = RegB
                 elsif r_IR = x"63" then -- PUSH A:B
                     v_ctrl.Out_Sel := OUT_SEL_B; -- Dato = RegB (Byte Bajo)
                 end if;

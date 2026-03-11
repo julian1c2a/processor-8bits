@@ -8,17 +8,9 @@ Este archivo lista las funcionalidades de la ISA v0.6 que aún no están impleme
 
 Muchas instrucciones están definidas en la ISA pero aún no tienen entrada en el `case` del decodificador de la UC.
 
-- [x] **Operaciones Lógicas (`XOR`)**
-  - [x] Opcodes `0x96`, `0xA6` implementados.
-
 - [ ] **Instrucciones de Pila para B (`PUSH B`, `POP B`)**
   - [ ] Opcodes `0x61`, `0x65`.
-    - [ ] Falta añadir los opcodes al decodificador y configurar `Out_Sel` (para PUSH) y `Write_B` (para POP) en los estados de ejecución existentes.
-
-- [ ] **Operaciones Unarias Faltantes**
-  - [ ] `INC B` (0xC4), `DEC B` (0xC5).
-  - [ ] `CLR A` (0xC6), `SET A` (0xC7), `SWAP A` (0xCE).
-  - [ ] Requieren añadir opcodes y configurar el `ALU_Op` correcto en el estado `S_EXEC_ALU_UNARY`.
+    - [x] Añadidos al decodificador y estados de ejecución.
 
 - [ ] **Instrucciones de Control de Flags (`SEC`, `CLC`)**
   - [ ] Opcodes `0x02`, `0x03`.
@@ -43,10 +35,6 @@ Muchas instrucciones están definidas en la ISA pero aún no tienen entrada en e
 ## Prioridad Baja (Optimizaciones y Arquitectura Avanzada v0.6)
 
 Estas características están definidas en la ISA pero requieren cambios estructurales significativos o son optimizaciones sobre la arquitectura actual.
-
-- [x] **Interrupciones Básicas (`IRQ`, `NMI`)**
-  - [x] Lógica de prioridad, registro `I`, secuencia de entrada (Push PC/F) y vectores implementada.
-  - [x] Instrucciones `SEI`, `CLI`, `RTI` implementadas.
 
 - [ ] **Pipeline de 2 Etapas (`DECODE | EXEC+WB`)**
   - [ ] Reestructurar la `ControlUnit` y el `DataPath` para incluir registros de pipeline.
