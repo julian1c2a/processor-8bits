@@ -16,6 +16,7 @@ package DataPath_pkg is
     constant OUT_SEL_ZERO : std_logic_vector(2 downto 0) := b"010";
     constant OUT_SEL_PCL  : std_logic_vector(2 downto 0) := b"011"; -- PC Low Byte
     constant OUT_SEL_PCH  : std_logic_vector(2 downto 0) := b"100"; -- PC High Byte
+    constant OUT_SEL_F    : std_logic_vector(2 downto 0) := b"101"; -- Flags (Status Register)
 
     -- Definición del Banco de Registros
     type register_file_t is array(0 to MSB_REGISTERS) of data_vector;
@@ -46,6 +47,7 @@ package DataPath_pkg is
             MDR_WE    : in  std_logic;
             ALU_Bin_Sel : in std_logic;
             Out_Sel   : in  std_logic_vector(2 downto 0);
+            Load_F_Direct : in std_logic;
             FlagsOut  : out status_vector
         );
     end component DataPath_comp;

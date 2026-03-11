@@ -51,8 +51,12 @@ architecture unique of ControlUnit is
         S_EXEC_PUSH_2,    -- PUSH: Escribir byte bajo
         S_EXEC_PUSH_3,    -- PUSH: Escribir byte alto (0x00)
         
+        S_EXEC_PUSH_F_2,  -- PUSH F: Escribir F
+        
         S_EXEC_POP_1,     -- POP: Leer byte bajo
         S_EXEC_POP_2,     -- POP: Guardar en Reg y Incrementar SP
+        
+        S_EXEC_POP_F_2,   -- POP F: Guardar en F
         
         S_EXEC_CALL_1,    -- CALL: Leer destino LOW
         S_EXEC_CALL_2,    -- CALL: Leer destino HIGH
@@ -275,8 +279,16 @@ begin
                     when x"60" =>
                         next_state <= S_EXEC_PUSH_1;
 
+                    -- PUSH F (0x62)
+                    when x"62" =>
+                        next_state <= S_EXEC_PUSH_1;
+
                     -- POP A (0x64)
                     when x"64" =>
+                        next_state <= S_EXEC_POP_1;
+
+                    -- POP F (0x66)
+                    when x"66" =>
                         next_state <= S_EXEC_POP_1;
 
                     -- CALL nn (0x75)
@@ -452,7 +464,10 @@ begin
                 v_ctrl.Mem_WE    := '1';
                 v_ctrl.Out_Sel   := OUT_SEL_A; -- Dato = RegA
                 v_ctrl.SP_Offset := '0';       -- Dir = SP
-                next_state       <= S_EXEC_PUSH_3;
+                if r_IR = x"62" then -- PUSH F
+                    v_ctrl.Out_Sel := OUT_SEL_F; -- Dato = RegF
+                end if;
+                next_state <= S_EXEC_PUSH_3;
 
             when S_EXEC_PUSH_3 =>
                 -- Paso 3: Escribir 0x00 en M[SP+1]
@@ -478,7 +493,17 @@ begin
                 v_ctrl.Bus_Op  := MEM_MDR_elected;
                 v_ctrl.Write_A := '1';
                 v_ctrl.SP_Op   := SP_OP_INC; -- SP += 2
-                -- (Byte alto M[SP+1] se ignora en POP A de 8 bits)
+                if r_IR = x"66" then -- POP F
+                    next_state <= S_EXEC_POP_F_2;
+                else
+                    next_state <= S_FETCH;
+                end if;
+
+            when S_EXEC_POP_F_2 =>
+                -- Alternativa para POP F: Escribir MDR en F
+                v_ctrl.Bus_Op  := MEM_MDR_elected;
+                v_ctrl.Load_F_Direct := '1'; -- Carga directa a F
+                v_ctrl.SP_Op   := SP_OP_INC; -- SP += 2
                 next_state     <= S_FETCH;
 
             -- -----------------------------------------------------------------

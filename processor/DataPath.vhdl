@@ -43,6 +43,7 @@ entity DataPath is
         MDR_WE    : in  std_logic; -- Habilitar escritura en MDR (Memory Data Register)
         ALU_Bin_Sel : in std_logic; -- Selección entrada B ALU: 0=Reg, 1=MDR
         Out_Sel   : in  std_logic_vector(2 downto 0); -- Selección salida: A, B, Zero, PCL, PCH
+        Load_F_Direct : in std_logic; -- Carga directa de Flags desde Bus_Int (POP F)
         
         -- Salidas de Estado hacia la UC
         FlagsOut  : out status_vector -- Para saltos condicionales
@@ -135,7 +136,10 @@ begin
             -- Gestión de Flags (Registro F)
             -- Usa 'Flag_Mask' para permitir actualizaciones parciales (ej. instrucciones
             -- que solo afectan a Z pero no a C).
-            if Write_F = '1' then
+            if Load_F_Direct = '1' then
+                -- Carga directa (POP F): Sobrescribe todo el registro desde el bus
+                RegF <= Bus_Int(status_vector'range);
+            elsif Write_F = '1' then
                 -- Actualización con máscara: (Old and NOT Mask) OR (New and Mask)
                 RegF <= apply_flag_mask(RegF, ALU_Stat, Flag_Mask);
             end if;
@@ -158,6 +162,7 @@ begin
         (others => '0') when OUT_SEL_ZERO,
         PC_In(7 downto 0)   when OUT_SEL_PCL,
         PC_In(15 downto 8)  when OUT_SEL_PCH,
+        RegF                when OUT_SEL_F,
         (others => '0') when others;
     
     FlagsOut   <= RegF;
