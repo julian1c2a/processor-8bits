@@ -128,7 +128,8 @@ architecture unique of ControlUnit is
         S_EXEC_JP_1,    -- JP nn: Leer byte bajo
         S_EXEC_JP_2,    -- JP nn: Leer byte alto
         S_EXEC_JP_3,    -- JP nn: Cargar PC
-        S_EXEC_JP_AB    -- JP A:B: Cargar PC desde registros
+        S_EXEC_JP_AB,   -- JP A:B: Cargar PC desde registros
+        S_EXEC_JPN      -- JPN page8: Cargar byte bajo PC
     );
 
     signal state, next_state : state_type;
@@ -247,6 +248,11 @@ begin
                         v_ctrl.Load_TMP_L := '1';
                         next_state <= S_EXEC_ADDR_FETCH_HI;
 
+                    -- LD A, [n+B] (0x16)
+                    when x"16" =>
+                        v_ctrl.Load_TMP_L := '1'; -- Carga 'n'
+                        next_state <= S_EXEC_PZ_FETCH;
+
                     -- LD A, [B] (0x14)
                     when x"14" =>
                         next_state <= S_EXEC_INDB_SETUP;
@@ -278,6 +284,11 @@ begin
                     when x"33" =>
                         v_ctrl.Load_TMP_L := '1';
                         next_state <= S_EXEC_ADDR_FETCH_HI;
+
+                    -- ST A, [n+B] (0x34)
+                    when x"34" =>
+                        v_ctrl.Load_TMP_L := '1'; -- Carga 'n'
+                        next_state <= S_EXEC_PZ_FETCH;
 
                     -- ST A, [B] (0x32)
                     when x"32" =>
@@ -414,6 +425,11 @@ begin
                     when x"71" =>
                         v_branch_taken := true; -- Siempre salta
                         next_state <= S_EXEC_BRANCH_REL_1;
+
+                    -- JPN page8 (0x72)
+                    when x"72" =>
+                        v_ctrl.Load_TMP_L := '1';
+                        next_state <= S_EXEC_JPN;
 
                     -- JP ([nn]) (0x73)
                     when x"73" =>
@@ -746,6 +762,17 @@ begin
                 next_state          <= S_FETCH;
 
             -- -----------------------------------------------------------------
+            -- EJECUCIÓN: JPN page8 (0x72)
+            -- -----------------------------------------------------------------
+            when S_EXEC_JPN =>
+                -- TMP_L ya tiene el operando page8 (leído en FETCH).
+                -- Cargamos TMP en PC, pero solo el byte bajo.
+                -- El byte alto de PC se conserva.
+                v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP (byte bajo)
+                v_ctrl.PC_Op        := PC_OP_LOAD_L;
+                next_state          <= S_FETCH;
+
+            -- -----------------------------------------------------------------
             -- EJECUCIÓN: JP A:B (0x74)
             -- -----------------------------------------------------------------
             when S_EXEC_JP_AB =>
@@ -863,6 +890,10 @@ begin
                 v_ctrl.ABUS_Sel  := ABUS_SRC_EA_RES;
                 v_ctrl.Mem_RE    := '1';
                 v_ctrl.MDR_WE    := '1';
+                -- Wrapping para [n+B] (0x16)
+                if r_IR = x"16" then
+                    v_ctrl.Force_ZP := '1';
+                end if;
                 next_state       <= S_EXEC_LD_WB;
 
             when S_EXEC_LD_WB =>
@@ -897,6 +928,10 @@ begin
                 v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
                 if r_IR(4) = '1' then v_ctrl.Out_Sel := OUT_SEL_A; else v_ctrl.Out_Sel := OUT_SEL_B; end if;
                 v_ctrl.Mem_WE   := '1';
+                -- Wrapping para [n+B] (0x34)
+                if r_IR = x"34" then
+                    v_ctrl.Force_ZP := '1';
+                end if;
                 next_state      <= S_FETCH;
 
             when S_EXEC_PZ_FETCH =>
@@ -904,16 +939,17 @@ begin
                 v_ctrl.Clear_TMP  := '1';
                 v_ctrl.Load_TMP_L := '1';
                 v_ctrl.PC_Op      := PC_OP_INC;
+                -- Corrección: Activar lectura de memoria para leer 'n'
+                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                v_ctrl.Mem_RE     := '1';
                 
-                -- Check bit 5 to distinguish LD (0x12/0x22) vs ST (0x30/0x40)
-                -- Opcodes: LD A (12), LD B (22), ST A (30), ST B (40)
-                -- Binario: 00010010, 00100010, 00110000, 01000000
-                -- LD opcodes have bit 5 = 0 (mostly) or different pattern.
-                -- Simple check: opcode < 0x30 is LD.
+                -- Bifurcación LD vs ST
                 if unsigned(r_IR) < x"30" then
-                    next_state <= S_EXEC_LD_ABS_READ;
+                    if r_IR = x"16" then next_state <= S_EXEC_LD_IDX_READ;
+                    else                 next_state <= S_EXEC_LD_ABS_READ; end if;
                 else
-                    next_state <= S_EXEC_ST_ABS_WRITE;
+                    if r_IR = x"34" then next_state <= S_EXEC_ST_IDX_WRITE;
+                    else                 next_state <= S_EXEC_ST_ABS_WRITE; end if;
                 end if;
 
             when S_EXEC_INDB_SETUP =>

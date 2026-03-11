@@ -124,6 +124,7 @@ begin
             Load_Src_Sel => s_CtrlBus.Load_Src_Sel,
             Clear_TMP    => s_CtrlBus.Clear_TMP,
             SP_Offset    => s_CtrlBus.SP_Offset,
+            Force_ZP     => s_CtrlBus.Force_ZP,
             EA_A_Sel     => s_CtrlBus.EA_A_Sel,
             EA_B_Sel     => s_CtrlBus.EA_B_Sel
             EA_Op        => s_CtrlBus.EA_Op

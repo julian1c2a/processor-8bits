@@ -8,9 +8,6 @@ Este archivo lista las funcionalidades de la ISA v0.6 que aún no están impleme
 
 - [ ] **Instrucciones Faltantes**
     - [ ] `JPN page8` (0x72) - Salto en la misma página.
-    - [ ] `LD A, [n+B]` (0x16) - Carga con indexado en página cero (wrap 8-bit).
-    - [ ] `ST A, [n+B]` (0x34) - Almacenamiento con indexado en página cero.
-
 ## Prioridad Baja (Optimizaciones y Arquitectura Avanzada v0.6)
 
 Estas características están definidas en la ISA pero requieren cambios estructurales significativos o son optimizaciones sobre la arquitectura actual.

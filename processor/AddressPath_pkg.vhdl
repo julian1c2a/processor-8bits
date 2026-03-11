@@ -8,7 +8,7 @@ package AddressPath_pkg is
     constant PC_OP_NOP  : std_logic_vector(1 downto 0) := "00"; -- Hold
     constant PC_OP_INC  : std_logic_vector(1 downto 0) := "01"; -- PC + 1
     constant PC_OP_LOAD : std_logic_vector(1 downto 0) := "10"; -- Cargar valor (saltos)
-    -- "11" Reservado
+    constant PC_OP_LOAD_L : std_logic_vector(1 downto 0) := "11"; -- Cargar solo byte bajo (JPN)
 
     -- Seleccion de operacion para el SP (Stack Pointer)
     -- El SP siempre se mueve de 2 en 2 segun la ISA (alineado a par)
@@ -70,6 +70,7 @@ package AddressPath_pkg is
             Load_Src_Sel : in std_logic;
             Clear_TMP : in  std_logic;
             SP_Offset : in  std_logic;
+            Force_ZP  : in  std_logic;
             EA_A_Sel  : in  std_logic_vector(1 downto 0);
             EA_B_Sel  : in  std_logic_vector(1 downto 0);
             EA_Op     : in  std_logic

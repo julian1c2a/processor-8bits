@@ -45,6 +45,7 @@ entity AddressPath is
         -- Selección de fuente para cargar PC/SP/LR (Calculado vs Dato directo)
         Load_Src_Sel : in std_logic; -- 0=EA_Adder_Res, 1=TMP (Dato 16 bits ensamblado)
         SP_Offset    : in std_logic; -- 0=SP, 1=SP+1 (para accesos de 16 bits secuenciales)
+        Force_ZP     : in std_logic; -- 1=Forzar MSB a 0 (Wrapping 8 bits)
         
         -- Selección de operandos para el EA Adder
         EA_A_Sel  : in  std_logic_vector(1 downto 0);
@@ -160,7 +161,8 @@ begin
                 when PC_OP_NOP  => null; -- Hold
                 when PC_OP_INC  => r_PC <= r_PC + 1;
                 when PC_OP_LOAD => r_PC <= Mux_Load_Data; -- Salto absoluto o relativo
-                when others => null;
+                when PC_OP_LOAD_L => r_PC(7 downto 0) <= Mux_Load_Data(7 downto 0); -- Salto misma página (JPN)
+                when others => null; 
             end case;
 
             -- --- Gestión del SP (Stack Pointer) ---
@@ -205,7 +207,12 @@ begin
                     AddressBus <= std_logic_vector(r_SP);
                 end if;
             when ABUS_SRC_EAR => AddressBus <= std_logic_vector(r_EAR);
-            when ABUS_SRC_EA_RES => AddressBus <= std_logic_vector(EA_Adder_Res);
+            when ABUS_SRC_EA_RES => 
+                if Force_ZP = '1' then
+                    AddressBus <= x"00" & std_logic_vector(EA_Adder_Res(7 downto 0));
+                else
+                    AddressBus <= std_logic_vector(EA_Adder_Res);
+                end if;
             when ABUS_SRC_VEC_NMI_L => AddressBus <= x"FFFA";
             when ABUS_SRC_VEC_NMI_H => AddressBus <= x"FFFB";
             when ABUS_SRC_VEC_IRQ_L => AddressBus <= x"FFFE";
