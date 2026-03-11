@@ -62,6 +62,11 @@ architecture unique of ControlUnit is
         S_EXEC_RET_1,     -- RET: Leer PC LOW desde Stack
         S_EXEC_RET_2,     -- RET: Leer PC HIGH desde Stack
         S_EXEC_RET_3,     -- RET: Cargar PC y restaurar SP
+
+        S_EXEC_ABS_FETCH_HI, -- LD/ST [nn]: Leer byte alto de dirección
+        S_EXEC_LD_ABS_READ,  -- LD A, [nn]: Leer dato de memoria
+        S_EXEC_LD_ABS_WB,    -- LD A, [nn]: Escribir dato en A
+        S_EXEC_ST_ABS_WRITE, -- ST A, [nn]: Escribir dato en memoria
         
         S_EXEC_BRANCH_REL_1, -- BEQ rel8: Fetch operando y cálculo de dirección
         S_EXEC_BRANCH_REL_2, -- BEQ rel8: Carga de PC si salto se toma
@@ -147,6 +152,11 @@ begin
                     when x"11" =>
                         next_state <= S_EXEC_LDI_1;
 
+                    -- LD A, [nn] (0x13)
+                    when x"13" =>
+                        v_ctrl.Load_TMP_L := '1';
+                        next_state <= S_EXEC_ABS_FETCH_HI;
+
                     -- LD B, A (0x20) - NUEVO
                     when x"20" =>
                         next_state <= S_EXEC_MOV_BA;
@@ -154,6 +164,11 @@ begin
                     -- LD B, #n (0x21) - NUEVO
                     when x"21" =>
                         next_state <= S_EXEC_LDI_B_1;
+
+                    -- ST A, [nn] (0x31)
+                    when x"31" =>
+                        v_ctrl.Load_TMP_L := '1';
+                        next_state <= S_EXEC_ABS_FETCH_HI;
 
                     -- ALU Register Ops (A op B) -> A
                     -- ADD(0x90), SUB(0x92), AND(0x94), OR(0x95), CMP(0x97)
@@ -451,6 +466,49 @@ begin
                 v_ctrl.PC_Op        := PC_OP_LOAD;
                 v_ctrl.SP_Op        := SP_OP_INC; -- SP += 2
                 next_state          <= S_FETCH;
+
+            -- -----------------------------------------------------------------
+            -- EJECUCIÓN: LD A, [nn] y ST A, [nn]
+            -- -----------------------------------------------------------------
+            when S_EXEC_ABS_FETCH_HI =>
+                -- PC apunta al byte alto de la dirección. Lo leemos y lo cargamos en TMP_H.
+                -- Al final de este ciclo, TMP contendrá la dirección completa [nn].
+                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                v_ctrl.Mem_RE     := '1';
+                v_ctrl.Load_TMP_H := '1';
+                v_ctrl.PC_Op      := PC_OP_INC; -- PC apunta a la siguiente instrucción
+                
+                -- Bifurcación: ¿es un LD o un ST?
+                if r_IR = x"13" then -- LD A, [nn]
+                    next_state <= S_EXEC_LD_ABS_READ;
+                else -- ST A, [nn]
+                    next_state <= S_EXEC_ST_ABS_WRITE;
+                end if;
+
+            when S_EXEC_LD_ABS_READ =>
+                -- TMP tiene la dirección. La ponemos en el bus y leemos de memoria.
+                v_ctrl.EA_A_Sel  := EA_A_SRC_TMP;
+                v_ctrl.EA_B_Sel  := EA_B_SRC_ZERO;
+                v_ctrl.ABUS_Sel  := ABUS_SRC_EA_RES;
+                v_ctrl.Mem_RE    := '1';
+                v_ctrl.MDR_WE    := '1'; -- Capturar el dato en MDR
+                next_state       <= S_EXEC_LD_ABS_WB;
+
+            when S_EXEC_LD_ABS_WB =>
+                -- El dato está en MDR. Lo escribimos en A.
+                v_ctrl.Bus_Op  := MEM_MDR_elected;
+                v_ctrl.Write_A := '1';
+                v_ctrl.Write_F := '1'; v_ctrl.Flag_Mask(idx_fZ) := '1'; -- LD afecta a Z
+                next_state     <= S_FETCH;
+
+            when S_EXEC_ST_ABS_WRITE =>
+                -- TMP tiene la dirección. Ponemos la dirección y el dato de A en los buses y escribimos.
+                v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
+                v_ctrl.EA_B_Sel := EA_B_SRC_ZERO;
+                v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
+                v_ctrl.Out_Sel  := OUT_SEL_A;
+                v_ctrl.Mem_WE   := '1';
+                next_state      <= S_FETCH;
 
             -- -----------------------------------------------------------------
             -- EJECUCIÓN: Salto Relativo Condicional (BEQ)

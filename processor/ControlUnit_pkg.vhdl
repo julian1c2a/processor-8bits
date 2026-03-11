@@ -42,7 +42,7 @@ package ControlUnit_pkg is
         Load_Src_Sel: std_logic;                    -- Fuente de carga para PC/SP (0=EA_Adder, 1=TMP)
         SP_Offset   : std_logic;                    -- Offset para dirección de Stack (0=+0, 1=+1)
         EA_A_Sel    : std_logic;                    -- Selección entrada A del EA Adder (PC o TMP)
-        EA_B_Sel    : std_logic;                    -- Selección entrada B del EA Adder (RegB o DataIn)
+        EA_B_Sel    : std_logic_vector(1 downto 0); -- Selección entrada B del EA Adder (RegB, DataIn, Zero)
 
         -- === MEMORIA / IO ===
         Mem_WE      : std_logic;                    -- Write Enable Memoria
@@ -95,8 +95,6 @@ end package ControlUnit_pkg;
             reset    : in  std_logic;
             FlagsIn  : in  status_vector;
             InstrIn  : in  data_vector;
-            CtrlBus  : out control_bus_t;
-            EA_A_Sel : out std_logic;
-            EA_B_Sel : out std_logic
+            CtrlBus  : out control_bus_t
         );
     end component ControlUnit_comp;

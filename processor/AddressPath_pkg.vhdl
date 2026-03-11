@@ -21,7 +21,7 @@ package AddressPath_pkg is
     constant ABUS_SRC_PC  : std_logic_vector(1 downto 0) := "00"; -- Fetch instrucciones
     constant ABUS_SRC_SP  : std_logic_vector(1 downto 0) := "01"; -- Stack Ops
     constant ABUS_SRC_EAR : std_logic_vector(1 downto 0) := "10"; -- Effective Address (LD/ST)
-    constant ABUS_SRC_LR  : std_logic_vector(1 downto 0) := "11"; -- Link Register (no suele ir directo al bus, pero util)
+    constant ABUS_SRC_EA_RES : std_logic_vector(1 downto 0) := "11"; -- Salida directa del sumador EA
 
     -- Seleccion de la fuente para cargar datos en registros internos (PC, LR, EAR)
     -- Usualmente viene de: Resultado del EA-Adder, Bus de Datos (concatenado), o Registros internos
@@ -32,8 +32,9 @@ package AddressPath_pkg is
     constant EA_A_SRC_TMP : std_logic := '0'; -- Base = TMP
     constant EA_A_SRC_PC  : std_logic := '1'; -- Base = PC
 
-    constant EA_B_SRC_REG_B   : std_logic := '0'; -- Índice = Registro B
-    constant EA_B_SRC_DATA_IN : std_logic := '1'; -- Índice = Dato de Memoria (rel8)
+    constant EA_B_SRC_REG_B   : std_logic_vector(1 downto 0) := "00"; -- Índice = Registro B
+    constant EA_B_SRC_DATA_IN : std_logic_vector(1 downto 0) := "01"; -- Índice = Dato de Memoria (rel8)
+    constant EA_B_SRC_ZERO    : std_logic_vector(1 downto 0) := "10"; -- Índice = 0
 
     -- Componente
     component AddressPath_comp is
@@ -54,7 +55,7 @@ package AddressPath_pkg is
             Load_Src_Sel : in std_logic;
             SP_Offset : in  std_logic;
             EA_A_Sel  : in  std_logic;
-            EA_B_Sel  : in  std_logic
+            EA_B_Sel  : in  std_logic_vector(1 downto 0)
         );
     end component AddressPath_comp;
 

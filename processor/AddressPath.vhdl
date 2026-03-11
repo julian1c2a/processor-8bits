@@ -45,7 +45,7 @@ entity AddressPath is
         
         -- Selección de operandos para el EA Adder
         EA_A_Sel  : in  std_logic;
-        EA_B_Sel  : in  std_logic
+        EA_B_Sel  : in  std_logic_vector(1 downto 0)
     );
 end entity AddressPath;
 
@@ -76,8 +76,11 @@ begin
     EA_Adder_A_In <= r_PC when EA_A_Sel = EA_A_SRC_PC else r_TMP;
     
     -- Multiplexor para la entrada B (Índice) del sumador
-    EA_Adder_B_In <= resize(signed(DataIn), 16) when EA_B_Sel = EA_B_SRC_DATA_IN else
-                     resize(unsigned(Index_B), 16);
+    with EA_B_Sel select EA_Adder_B_In <= 
+        resize(unsigned(Index_B), 16) when EA_B_SRC_REG_B,
+        resize(signed(DataIn), 16)    when EA_B_SRC_DATA_IN,
+        (others => '0')               when EA_B_SRC_ZERO,
+        (others => '0')               when others;
 
     -- Calcula: Base (TMP) + Índice (B extendido)
     -- Sirve para: [nn+B], Saltos relativos (PC + rel8), etc.
@@ -162,7 +165,7 @@ begin
                     AddressBus <= std_logic_vector(r_SP);
                 end if;
             when ABUS_SRC_EAR => AddressBus <= std_logic_vector(r_EAR);
-            when ABUS_SRC_LR  => AddressBus <= std_logic_vector(r_LR);
+            when ABUS_SRC_EA_RES => AddressBus <= std_logic_vector(EA_Adder_Res);
             when others       => AddressBus <= (others => '0');
         end case;
     end process;
