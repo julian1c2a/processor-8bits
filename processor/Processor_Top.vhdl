@@ -61,8 +61,8 @@ architecture Structural of Processor_Top is
 
     -- Component Configurations
     for all : DataPath_comp    use entity work.DataPath(unique);
-    for all : AddressPath_comp use entity work.AddressPath(Behavioral);
-    for all : ControlUnit_comp use entity work.ControlUnit(Behavioral);
+    for all : AddressPath_comp use entity work.AddressPath(unique);
+    for all : ControlUnit_comp use entity work.ControlUnit(unique);
 
     -- =========================================================================
     -- Señales de Interconexión Interna

@@ -48,7 +48,7 @@ entity AddressPath is
     );
 end entity AddressPath;
 
-architecture Behavioral of AddressPath is
+architecture unique of AddressPath is
 
     -- Registros internos de 16 bits
     signal r_PC  : unsigned_address_vector := (others => '0');

@@ -20,7 +20,7 @@ use work.ALU_pkg.ALL;
 entity Processor_Top_tb is
 end entity Processor_Top_tb;
 
-architecture Behavioral of Processor_Top_tb is
+architecture unique of Processor_Top_tb is
 
     -- Señales del procesador
     signal clk         : std_logic := '0';

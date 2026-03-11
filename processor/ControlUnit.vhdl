@@ -20,7 +20,7 @@ entity ControlUnit is
     );
 end entity ControlUnit;
 
-architecture Behavioral of ControlUnit is
+architecture unique of ControlUnit is
 
     -- Estados de la FSM principal
     type state_type is (
