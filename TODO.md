@@ -10,11 +10,24 @@ Muchas instrucciones están definidas en la ISA pero aún no tienen entrada en e
 
 - [ ] **Instrucciones de Pila para B (`PUSH B`, `POP B`)**
   - [ ] Opcodes `0x61`, `0x65`.
+- [x] **Operaciones Lógicas (`XOR`)**
+  - [x] Opcodes `0x96`, `0xA6` implementados.
+
+- [x] **Instrucciones de Pila para B (`PUSH B`, `POP B`)**
+    - [x] Opcodes `0x61`, `0x65`.
     - [x] Añadidos al decodificador y estados de ejecución.
 
 - [ ] **Instrucciones de Control de Flags (`SEC`, `CLC`)**
   - [ ] Opcodes `0x02`, `0x03`.
   - [ ] Requiere una forma de que la UC modifique directamente el registro de flags, posiblemente a través de una operación especial en la ALU o una nueva señal de control.
+- [x] **Operaciones Unarias Faltantes**
+  - [x] `INC B` (0xC4), `DEC B` (0xC5).
+  - [x] `CLR A` (0xC6), `SET A` (0xC7), `SWAP A` (0xCE).
+  - [x] Añadidas al decodificador y `S_EXEC_ALU_UNARY`.
+
+- [x] **Instrucciones de Control de Flags (`SEC`, `CLC`)**
+    - [x] Opcodes `0x02`, `0x03`.
+    - [x] Implementado usando operaciones ALU (CMP/AND) con máscara de flags.
 
 - [ ] **Manipulación del Stack Pointer (`LD SP`, `ST SP`)**
   - [ ] Opcodes `0x50`-`0x53`.
@@ -35,6 +48,10 @@ Muchas instrucciones están definidas en la ISA pero aún no tienen entrada en e
 ## Prioridad Baja (Optimizaciones y Arquitectura Avanzada v0.6)
 
 Estas características están definidas en la ISA pero requieren cambios estructurales significativos o son optimizaciones sobre la arquitectura actual.
+
+- [x] **Interrupciones Básicas (`IRQ`, `NMI`)**
+  - [x] Lógica de prioridad, registro `I`, secuencia de entrada (Push PC/F) y vectores implementada.
+  - [x] Instrucciones `SEI`, `CLI`, `RTI` implementadas.
 
 - [ ] **Pipeline de 2 Etapas (`DECODE | EXEC+WB`)**
   - [ ] Reestructurar la `ControlUnit` y el `DataPath` para incluir registros de pipeline.

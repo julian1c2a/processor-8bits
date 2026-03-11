@@ -34,6 +34,8 @@ architecture unique of ControlUnit is
         -- Estados de Ejecución
         S_EXEC_HALT,    -- Detener procesador
         
+        S_EXEC_FLAGS,   -- Manipulación de flags (SEC, CLC)
+        
         S_EXEC_LDI_1,   -- LD A, #n: Leer inmediato
         S_EXEC_LDI_2,   -- LD A, #n: Escribir en A
         
@@ -198,6 +200,10 @@ begin
                     -- HALT (0x01)
                     when x"01" => 
                         next_state <= S_EXEC_HALT;
+                        
+                    -- SEC (0x02) / CLC (0x03)
+                    when x"02" | x"03" =>
+                        next_state <= S_EXEC_FLAGS;
                         
                     -- SEI (0x04) / CLI (0x05)
                     when x"04" | x"05" =>
@@ -392,6 +398,22 @@ begin
             when S_EXEC_HALT =>
                 -- Bucle infinito, sin actividad de bus
                 next_state <= S_EXEC_HALT;
+                
+            -- -----------------------------------------------------------------
+            -- EJECUCIÓN: Control de Flags (SEC, CLC)
+            -- -----------------------------------------------------------------
+            when S_EXEC_FLAGS =>
+                v_ctrl.Reg_Sel := (others => '0'); -- R0 (A)
+                v_ctrl.Bus_Op  := ACC_ALU_elected; -- Necesario para enrutar ALU (aunque no escribamos A)
+                v_ctrl.Write_F := '1';
+                v_ctrl.Flag_Mask := x"80"; -- Solo actualizar C (bit 7)
+                
+                if r_IR = x"02" then -- SEC
+                    v_ctrl.ALU_Op := OP_CMP; -- A - A = 0 (No borrow -> C=1)
+                else -- CLC
+                    v_ctrl.ALU_Op := OP_AND; -- A and A (Logic op -> C=0)
+                end if;
+                next_state <= S_FETCH;
 
             -- -----------------------------------------------------------------
             -- EJECUCIÓN: LD A, #n  (Opcode 0x11)
