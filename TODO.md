@@ -12,9 +12,9 @@ Este archivo lista las funcionalidades de la ISA v0.6 que aún no están impleme
   - [ ] La UC debe gestionar la lectura de operandos de 8 o 16 bits y escribir el resultado de 16 bits de vuelta en A (alto) y B (bajo).
   - [ ] Implementar la lógica de flags de 16 bits (C, V, Z).
 
-- [ ] **Instrucciones con Carry (`ADC`, `SBB`)**
-  - [ ] Opcodes `0x91`, `0x93`, `0xA1`, `0xA3`.
-  - [ ] Requiere una modificación en el `DataPath` para que la señal `Carry_in` de la ALU pueda ser controlada por la UC (probablemente seleccionando entre '0' y el flag C actual).
+- [x] **Instrucciones con Carry (`ADC`, `SBB`)**
+  - [x] Opcodes `0x91`, `0x93`, `0xA1`, `0xA3`.
+  - [x] Implementado en ControlUnit. DataPath ya conectaba Carry_in a RegF(C), y la ALU discrimina internamente si usarlo o no según el opcode.
 
 ## Prioridad Media (Completar Sets de Instrucciones)
 

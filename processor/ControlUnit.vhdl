@@ -238,13 +238,13 @@ begin
                         next_state <= S_EXEC_IO_SETUP_REG;
 
                     -- ALU Register Ops (A op B) -> A
-                    -- ADD(0x90), SUB(0x92), AND(0x94), OR(0x95), CMP(0x97)
-                    when x"90" | x"92" | x"94" | x"95" | x"97" =>
+                    -- ADD(90), ADC(91), SUB(92), SBB(93), AND(94), OR(95), CMP(97)
+                    when x"90" | x"91" | x"92" | x"93" | x"94" | x"95" | x"97" =>
                         next_state <= S_EXEC_ALU_R;
 
                     -- ALU Immediate Ops (A op #n) -> A
-                    -- ADD#(0xA0), SUB#(0xA2), AND#(0xA4), OR#(0xA5), CMP#(0xA7)
-                    when x"A0" | x"A2" | x"A4" | x"A5" | x"A7" =>
+                    -- ADD#(A0), ADC#(A1), SUB#(A2), SBB#(A3), AND#(A4), OR#(A5), CMP#(A7)
+                    when x"A0" | x"A1" | x"A2" | x"A3" | x"A4" | x"A5" | x"A7" =>
                         next_state <= S_EXEC_ALU_IMM_1;
 
                     -- Shift/Rotate Ops (A)
@@ -402,7 +402,9 @@ begin
                 
                 case r_IR is
                     when x"90" => v_ctrl.ALU_Op := OP_ADD; v_ctrl.Flag_Mask := x"FF";
+                    when x"91" => v_ctrl.ALU_Op := OP_ADC; v_ctrl.Flag_Mask := x"FC"; -- C,H,V,Z,G,E
                     when x"92" => v_ctrl.ALU_Op := OP_SUB; v_ctrl.Flag_Mask := x"FF";
+                    when x"93" => v_ctrl.ALU_Op := OP_SBB; v_ctrl.Flag_Mask := x"FC"; -- C,H,V,Z,G,E
                     when x"94" => v_ctrl.ALU_Op := OP_AND; v_ctrl.Flag_Mask := x"1C"; -- Z,G,E
                     when x"95" => v_ctrl.ALU_Op := OP_IOR; v_ctrl.Flag_Mask := x"1C";
                     when x"97" => v_ctrl.ALU_Op := OP_CMP; v_ctrl.Flag_Mask := x"FF"; v_ctrl.Write_A := '0'; -- CMP A, B (No escribe A)
@@ -428,7 +430,9 @@ begin
                 
                 case r_IR is
                     when x"A0" => v_ctrl.ALU_Op := OP_ADD; v_ctrl.Flag_Mask := x"FF";
+                    when x"A1" => v_ctrl.ALU_Op := OP_ADC; v_ctrl.Flag_Mask := x"FC";
                     when x"A2" => v_ctrl.ALU_Op := OP_SUB; v_ctrl.Flag_Mask := x"FF";
+                    when x"A3" => v_ctrl.ALU_Op := OP_SBB; v_ctrl.Flag_Mask := x"FC";
                     when x"A4" => v_ctrl.ALU_Op := OP_AND; v_ctrl.Flag_Mask := x"1C";
                     when x"A5" => v_ctrl.ALU_Op := OP_IOR; v_ctrl.Flag_Mask := x"1C";
                     when x"A7" => v_ctrl.ALU_Op := OP_CMP; v_ctrl.Flag_Mask := x"FF"; v_ctrl.Write_A := '0'; -- CMP #n (No escribe A)
