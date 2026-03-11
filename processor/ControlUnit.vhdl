@@ -58,6 +58,10 @@ architecture unique of ControlUnit is
         S_EXEC_CALL_4,    -- CALL: Push PC LOW
         S_EXEC_CALL_5,    -- CALL: Push PC HIGH
         S_EXEC_CALL_6,    -- CALL: Cargar PC destino
+
+        S_EXEC_RET_1,     -- RET: Leer PC LOW desde Stack
+        S_EXEC_RET_2,     -- RET: Leer PC HIGH desde Stack
+        S_EXEC_RET_3,     -- RET: Cargar PC y restaurar SP
         
         S_EXEC_BRANCH_REL_1, -- BEQ rel8: Fetch operando y cálculo de dirección
         S_EXEC_BRANCH_REL_2, -- BEQ rel8: Carga de PC si salto se toma
@@ -198,6 +202,10 @@ begin
                     -- CALL nn (0x75)
                     when x"75" =>
                         next_state <= S_EXEC_CALL_1;
+
+                    -- RET (0x77)
+                    when x"77" =>
+                        next_state <= S_EXEC_RET_1;
 
                     -- JP nn (0x70)
                     when x"70" =>
@@ -413,6 +421,35 @@ begin
                 -- 6. Cargar PC con destino (TMP)
                 v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP
                 v_ctrl.PC_Op        := PC_OP_LOAD;
+                next_state          <= S_FETCH;
+
+            -- -----------------------------------------------------------------
+            -- EJECUCIÓN: RET (0x77)
+            -- -----------------------------------------------------------------
+            -- Nota: Esta es una implementación de 3 ciclos de ejecución para una
+            -- arquitectura de memoria de puerto único. La ISA v0.6 prevé una
+            -- optimización a 2 ciclos usando RAS y TDP.
+            when S_EXEC_RET_1 =>
+                -- 1. Leer Low Byte de retorno desde M[SP] -> TMP_L
+                v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
+                v_ctrl.SP_Offset  := '0';
+                v_ctrl.Mem_RE     := '1';
+                v_ctrl.Load_TMP_L := '1';
+                next_state        <= S_EXEC_RET_2;
+
+            when S_EXEC_RET_2 =>
+                -- 2. Leer High Byte de retorno desde M[SP+1] -> TMP_H
+                v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
+                v_ctrl.SP_Offset  := '1';
+                v_ctrl.Mem_RE     := '1';
+                v_ctrl.Load_TMP_H := '1';
+                next_state        <= S_EXEC_RET_3;
+
+            when S_EXEC_RET_3 =>
+                -- 3. Cargar PC con la dirección de retorno (TMP) y restaurar SP
+                v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP
+                v_ctrl.PC_Op        := PC_OP_LOAD;
+                v_ctrl.SP_Op        := SP_OP_INC; -- SP += 2
                 next_state          <= S_FETCH;
 
             -- -----------------------------------------------------------------
