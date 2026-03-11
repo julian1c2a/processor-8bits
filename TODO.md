@@ -8,7 +8,7 @@ Este archivo lista las funcionalidades de la ISA v0.6 que aún no están impleme
 
 - [x] **Instrucciones de 16 bits (`ADD16`, `SUB16`)**
   - [x] Opcodes `0xE1` (#nn) y `0xE3` (#nn) implementados.
-  - [ ] Falta implementar variantes inmediatas cortas `0xE0` (#n) y `0xE2` (#n).
+  - [x] Variantes inmediatas cortas `0xE0` (#n) y `0xE2` (#n) implementadas.
   - [x] Reutilización del AddressPath y lógica de flags completada.
 
 - [x] **Instrucciones con Carry (`ADC`, `SBB`)**
