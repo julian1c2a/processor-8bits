@@ -121,6 +121,10 @@ architecture unique of ControlUnit is
         S_EXEC_BRANCH_REL_2, -- BEQ rel8: Carga de PC si salto se toma
         S_SKIP_BYTE,         -- Estado para saltar un byte (operandos no usados)
         
+        S_EXEC_IND_LOAD_PTR, -- JP/CALL ([nn]): PC <- TMP (para leer puntero)
+        S_EXEC_IND_READ_L,   -- JP/CALL ([nn]): Leer byte bajo destino
+        S_EXEC_IND_READ_H,   -- JP/CALL ([nn]): Leer byte alto destino
+        
         S_EXEC_JP_1,    -- JP nn: Leer byte bajo
         S_EXEC_JP_2,    -- JP nn: Leer byte alto
         S_EXEC_JP_3     -- JP nn: Cargar PC
@@ -404,6 +408,16 @@ begin
                     -- JP nn (0x70)
                     when x"70" =>
                         next_state <= S_EXEC_JP_1;
+
+                    -- JP ([nn]) (0x73)
+                    when x"73" =>
+                        v_ctrl.Load_TMP_L := '1';
+                        next_state <= S_EXEC_ADDR_FETCH_HI;
+
+                    -- CALL ([nn]) (0x76)
+                    when x"76" =>
+                        v_ctrl.Load_TMP_L := '1';
+                        next_state <= S_EXEC_ADDR_FETCH_HI;
 
                     when others =>
                         -- Opcode no implementado: tratar como NOP por ahora
@@ -709,7 +723,11 @@ begin
                 v_ctrl.Mem_WE    := '1';
                 v_ctrl.Out_Sel   := OUT_SEL_PCH; -- Salida = PC_H
                 v_ctrl.SP_Offset := '1';
-                next_state       <= S_EXEC_CALL_6;
+                if r_IR = x"76" then 
+                    next_state <= S_EXEC_IND_LOAD_PTR;
+                else
+                    next_state <= S_EXEC_CALL_6;
+                end if;
 
             when S_EXEC_CALL_6 =>
                 -- 6. Cargar PC con destino (TMP)
@@ -804,6 +822,8 @@ begin
                     when x"33" | x"42" => next_state <= S_EXEC_ST_IDX_WRITE; -- ST [nn+B]
                     when x"12" | x"22" | x"30" | x"40" => next_state <= S_EXEC_PZ_FETCH; -- [n]
                     when x"14" | x"24" | x"32"         => next_state <= S_EXEC_INDB_SETUP; -- [B]
+                    when x"73"         => next_state <= S_EXEC_IND_LOAD_PTR; -- JP ([nn])
+                    when x"76"         => next_state <= S_EXEC_CALL_3;       -- CALL ([nn]) - Push PC first
                     when others => next_state <= S_FETCH;
                 end if;
 
@@ -884,6 +904,31 @@ begin
                 -- La instrucción LD B, [B] es de 1 byte, PC ya apunta a la siguiente.
                 -- Reutilizamos el estado de lectura indexada.
                 next_state <= S_EXEC_LD_IDX_READ;
+
+            -- -----------------------------------------------------------------
+            -- EJECUCIÓN: Saltos Indirectos (JP/CALL ([nn]))
+            -- -----------------------------------------------------------------
+            when S_EXEC_IND_LOAD_PTR =>
+                -- Cargar PC con la dirección del puntero (que está en TMP)
+                v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP
+                v_ctrl.PC_Op        := PC_OP_LOAD;
+                next_state          <= S_EXEC_IND_READ_L;
+
+            when S_EXEC_IND_READ_L =>
+                -- Leer byte bajo del destino final desde M[PC] -> TMP_L
+                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                v_ctrl.Mem_RE     := '1';
+                v_ctrl.Load_TMP_L := '1';
+                v_ctrl.PC_Op      := PC_OP_INC;
+                next_state        <= S_EXEC_IND_READ_H;
+
+            when S_EXEC_IND_READ_H =>
+                -- Leer byte alto del destino final desde M[PC] -> TMP_H
+                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                v_ctrl.Mem_RE     := '1';
+                v_ctrl.Load_TMP_H := '1';
+                -- Siguiente: Cargar PC desde TMP (Destino Final). Reusamos JP_3.
+                next_state        <= S_EXEC_JP_3;
 
             -- -----------------------------------------------------------------
             -- EJECUCIÓN: IN / OUT

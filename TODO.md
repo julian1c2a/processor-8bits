@@ -8,8 +8,6 @@ Este archivo lista las funcionalidades de la ISA v0.6 que aún no están impleme
 
 Muchas instrucciones están definidas en la ISA pero aún no tienen entrada en el `case` del decodificador de la UC.
 
-- [ ] **Instrucciones de Pila para B (`PUSH B`, `POP B`)**
-  - [ ] Opcodes `0x61`, `0x65`.
 - [x] **Operaciones Lógicas (`XOR`)**
   - [x] Opcodes `0x96`, `0xA6` implementados.
 
@@ -17,9 +15,6 @@ Muchas instrucciones están definidas en la ISA pero aún no tienen entrada en e
     - [x] Opcodes `0x61`, `0x65`.
     - [x] Añadidos al decodificador y estados de ejecución.
 
-- [ ] **Instrucciones de Control de Flags (`SEC`, `CLC`)**
-  - [ ] Opcodes `0x02`, `0x03`.
-  - [ ] Requiere una forma de que la UC modifique directamente el registro de flags, posiblemente a través de una operación especial en la ALU o una nueva señal de control.
 - [x] **Operaciones Unarias Faltantes**
   - [x] `INC B` (0xC4), `DEC B` (0xC5).
   - [x] `CLR A` (0xC6), `SET A` (0xC7), `SWAP A` (0xCE).
