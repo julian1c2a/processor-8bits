@@ -241,8 +241,8 @@ begin
                         next_state <= S_EXEC_ALU_IMM_1;
 
                     -- Shift/Rotate Ops (A)
-                    -- LSL(0xC8), LSR(0xC9), ASL(0xCA), ASR(0xCB), ROL(0xCC), ROR(0xCD)
-                    when x"C8" | x"C9" | x"CA" | x"CB" | x"CC" | x"CD" =>
+                    -- Unary ops on A: NOT,NEG,INC,DEC,Shifts,Rotates
+                    when x"C0" | x"C1" | x"C2" | x"C3" | x"C8" | x"C9" | x"CA" | x"CB" | x"CC" | x"CD" =>
                         next_state <= S_EXEC_ALU_UNARY;
 
                     -- Saltos Condicionales (0x80 - 0x8B)
@@ -424,6 +424,10 @@ begin
                 v_ctrl.Write_F := '1';
                 
                 case r_IR is
+                    when x"C0" => v_ctrl.ALU_Op := OP_NOT; v_ctrl.Flag_Mask := x"10"; -- Z
+                    when x"C1" => v_ctrl.ALU_Op := OP_NEG; v_ctrl.Flag_Mask := x"F0"; -- C,H,V,Z
+                    when x"C2" => v_ctrl.ALU_Op := OP_INC; v_ctrl.Flag_Mask := x"F0"; -- C,H,V,Z
+                    when x"C3" => v_ctrl.ALU_Op := OP_DEC; v_ctrl.Flag_Mask := x"F0"; -- C,H,V,Z
                     when x"C8" => v_ctrl.ALU_Op := OP_LSL; v_ctrl.Flag_Mask := x"11"; -- Z, L
                     when x"C9" => v_ctrl.ALU_Op := OP_LSR; v_ctrl.Flag_Mask := x"12"; -- Z, R
                     when x"CA" => v_ctrl.ALU_Op := OP_ASL; v_ctrl.Flag_Mask := x"31"; -- Z, L, V
