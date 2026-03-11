@@ -783,7 +783,7 @@ begin
                 if r_IR(4) = '1' then -- Opcodes 3x (ST A) vs 4x (ST B)
                     v_ctrl.Out_Sel := OUT_SEL_A;
                 else
-                    v_ctrl.Out_Sel := OUT_SEL_A;
+                    v_ctrl.Out_Sel := OUT_SEL_B;
                 end if;
                 v_ctrl.Mem_WE   := '1';
                 next_state      <= S_FETCH;

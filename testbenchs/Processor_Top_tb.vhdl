@@ -30,7 +30,6 @@ architecture unique of Processor_Top_tb is
     signal MemData_Out : data_vector;
     signal Mem_WE      : std_logic;
     signal Mem_RE      : std_logic;
-    signal Mem_Ready   : std_logic := '0';
     signal IO_WE       : std_logic;
     signal IO_RE       : std_logic;
 
@@ -93,9 +92,6 @@ architecture unique of Processor_Top_tb is
 
     constant clk_period : time := 10 ns;
 
-    -- Simulación de latencia de SRAM
-    constant WAIT_STATES : integer := 4; -- 4 wait states + 1 ciclo acceso = 5 ciclos total
-
 begin
 
     -- Instancia del Procesador
@@ -108,7 +104,6 @@ begin
             MemData_Out => MemData_Out,
             Mem_WE      => Mem_WE,
             Mem_RE      => Mem_RE,
-            Mem_Ready   => Mem_Ready,
             IO_WE       => IO_WE,
             IO_RE       => IO_RE
         );
@@ -122,50 +117,29 @@ begin
         wait for clk_period/2;
     end process;
 
-    -- Modelo de Memoria con Wait States
-    -- Simula una SRAM asíncrona que tarda N ciclos en responder.
-    -- El controlador de memoria (simulado aquí) gestiona el handshake Mem_Ready.
-    mem_proc: process(clk, reset)
+    -- Modelo de Memoria Asíncrona (Simplificado)
+    mem_proc: process(MemAddress, Mem_RE, Mem_WE, MemData_Out)
         variable addr_int : integer;
-        variable wait_cnt : integer := 0;
     begin
-        if reset = '1' then
-            Mem_Ready <= '0';
-            wait_cnt  := 0;
-            MemData_In <= (others => 'Z');
-        elsif rising_edge(clk) then
-            addr_int := to_integer(unsigned(MemAddress));
-            
-            -- Lógica de Wait States
-            if (Mem_RE = '1' or Mem_WE = '1') then
-                if wait_cnt < WAIT_STATES then
-                    wait_cnt := wait_cnt + 1;
-                    Mem_Ready <= '0';
-                else
-                    -- Memoria lista
-                    Mem_Ready <= '1';
-                    
-                    -- Escritura síncrona al final del ciclo de espera
-                    if Mem_WE = '1' then
-                        RAM(addr_int) <= MemData_Out;
-                    end if;
-                end if;
-            else
-                -- Bus inactivo
-                wait_cnt := 0;
-                Mem_Ready <= '0';
-            end if;
+        addr_int := to_integer(unsigned(MemAddress));
+        
+        -- Lectura
+        if Mem_RE = '1' then
+            MemData_In <= RAM(addr_int);
+        else
+            MemData_In <= (others => 'Z'); -- Alta impedancia si no lee
+        end if;
+
+        -- Escritura (Síncrona o Asíncrona según modelo, aquí asíncrona para simplificar TB)
+        if Mem_WE = '1' then
+            RAM(addr_int) <= MemData_Out;
         end if;
     end process;
-
-    -- Lectura de datos: Conectada al bus cuando RE y Ready están activos
-    -- (o asumiendo que el dato es válido tras el tiempo de espera)
-    MemData_In <= RAM(to_integer(unsigned(MemAddress))) when (Mem_RE = '1' and Mem_Ready = '1') else (others => 'Z');
 
     -- Proceso de Estímulo
     stim_proc: process
     begin
-        report "=== INICIO SIMULACION PROCESADOR (Test Overflow Flag) ===";
+        report "=== INICIO SIMULACION PROCESADOR (Test ADD16/SUB16) ===";
         
         -- Reset del sistema
         reset <= '1';
@@ -174,32 +148,32 @@ begin
         report "--- Reset liberado, iniciando programa ---";
 
         -- Esperar un tiempo suficiente para que el programa se ejecute y se detenga en un HALT.
-        -- Al añadir wait states, cada instrucción tarda más. Aumentamos el tiempo de simulación.
-        wait for clk_period * 200;
+        wait for clk_period * 60;
 
         report "--- Verificación ---";
-        -- Al final, PC debe estar en 0x001F (HALT en 0x001E + 1)
-        assert MemAddress = x"001F"
-            report "FAIL: El PC final no es correcto. Esperado 0x001F, obtenido: 0x" & to_hstring(MemAddress)
+        -- Al final, PC debe estar en 0x0016 (HALT en 0x0015 + 1)
+        assert MemAddress = x"0016"
+            report "FAIL: El PC final no es correcto. Esperado 0x0016, obtenido: 0x" & to_hstring(MemAddress)
             severity error;
             
-        -- 1. Overflow Positivo: 0x7F + 0x01 = 0x80
-        assert RAM(16#0100#) = x"80"
-            report "FAIL: Suma overflow positivo incorrecta. Esperado 0x80, Leído: 0x" & to_hstring(RAM(16#0100#))
+        -- 1. ADD16: 0x00FF + 1 = 0x0100
+        assert RAM(16#0100#) = x"01"
+            report "FAIL: ADD16 High incorrecto. Esperado 0x01, Leído: 0x" & to_hstring(RAM(16#0100#))
+            severity error;
+        assert RAM(16#0101#) = x"00"
+            report "FAIL: ADD16 Low incorrecto. Esperado 0x00, Leído: 0x" & to_hstring(RAM(16#0101#))
             severity error;
 
-        -- 2. Overflow Negativo: 0x80 + 0xFF = 0x7F
-        assert RAM(16#0101#) = x"7F"
-            report "FAIL: Suma overflow negativo incorrecta. Esperado 0x7F, Leído: 0x" & to_hstring(RAM(16#0101#))
+        -- 2. SUB16: 0x0100 - 1 = 0x00FF
+        assert RAM(16#0102#) = x"00"
+            report "FAIL: SUB16 High incorrecto. Esperado 0x00, Leído: 0x" & to_hstring(RAM(16#0102#))
+            severity error;
+        assert RAM(16#0103#) = x"FF"
+            report "FAIL: SUB16 Low incorrecto. Esperado 0xFF, Leído: 0x" & to_hstring(RAM(16#0103#))
             severity error;
 
-        -- 3. Sin Overflow: 0x01 + 0x01 = 0x02
-        assert RAM(16#0102#) = x"02"
-            report "FAIL: Suma sin overflow incorrecta. Esperado 0x02, Leído: 0x" & to_hstring(RAM(16#0102#))
-            severity error;
-
-        if (MemAddress = x"001F") and (RAM(16#0100#) = x"80") and (RAM(16#0101#) = x"7F") and (RAM(16#0102#) = x"02") then
-            report "PASS: Flag de Overflow (V) verificado correctamente.";
+        if (MemAddress = x"0016") and (RAM(16#0100#) = x"01") and (RAM(16#0103#) = x"FF") then
+            report "PASS: Instrucciones ADD16/SUB16 verificadas correctamente.";
         end if;
 
         report "=== FIN DE SIMULACION ===";
