@@ -83,6 +83,7 @@ begin
         r_TMP                           when EA_A_SRC_TMP,
         r_PC                            when EA_A_SRC_PC,
         resize(unsigned(Index_A & Index_B), 16) when EA_A_SRC_REG_AB,
+        r_SP                            when EA_A_SRC_SP,
         (others => '0')                 when others;
     
     -- Multiplexor para la entrada B (Índice) del sumador

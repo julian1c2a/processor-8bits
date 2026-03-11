@@ -29,13 +29,6 @@ Muchas instrucciones están definidas en la ISA pero aún no tienen entrada en e
     - [x] Opcodes `0x02`, `0x03`.
     - [x] Implementado usando operaciones ALU (CMP/AND) con máscara de flags.
 
-- [ ] **Manipulación del Stack Pointer (`LD SP`, `ST SP`)**
-  - [ ] Opcodes `0x50`-`0x53`.
-  - [ ] Requiere cargar el SP desde un inmediato o desde A:B, y guardar el SP en A.
-
-- [ ] **Saltos a Registros (`JP A:B`)**
-  - [ ] Opcode `0x74`.
-  - [ ] Requiere una nueva ruta de datos para cargar el PC desde el par de registros A:B.
 
 - [ ] **Saltos y Llamadas Indirectas (`JP ([nn])`, `CALL ([nn])`)**
   - [ ] Opcodes `0x73`, `0x76`.

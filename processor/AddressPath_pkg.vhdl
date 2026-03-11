@@ -37,6 +37,7 @@ package AddressPath_pkg is
     constant EA_A_SRC_TMP    : std_logic_vector(1 downto 0) := "00"; -- Base = TMP
     constant EA_A_SRC_PC     : std_logic_vector(1 downto 0) := "01"; -- Base = PC
     constant EA_A_SRC_REG_AB : std_logic_vector(1 downto 0) := "10"; -- Base = A:B
+    constant EA_A_SRC_SP     : std_logic_vector(1 downto 0) := "11"; -- Base = SP
 
     constant EA_B_SRC_REG_B   : std_logic_vector(1 downto 0) := "00"; -- Índice = Registro B
     constant EA_B_SRC_DATA_IN : std_logic_vector(1 downto 0) := "01"; -- Índice = Dato de Memoria (rel8)

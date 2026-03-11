@@ -112,6 +112,11 @@ architecture unique of ControlUnit is
         S_EXEC_OP16_WB_1,     -- 16-bit Ops #nn: Write-Back High (A) + Flags
         S_EXEC_OP16_WB_2,     -- 16-bit Ops: Write-Back Low (B) Common
         
+        S_EXEC_LDSP_1,        -- LD SP, #nn: Leer byte bajo
+        S_EXEC_LDSP_2,        -- LD SP, #nn: Leer byte alto y cargar SP
+        S_EXEC_LDSP_AB,       -- LD SP, A:B: Cargar SP desde registros
+        S_EXEC_STSP_WB,       -- ST SP_L/H, A: Guardar parte del SP en A
+        
         S_EXEC_BRANCH_REL_1, -- BEQ rel8: Fetch operando y cálculo de dirección
         S_EXEC_BRANCH_REL_2, -- BEQ rel8: Carga de PC si salto se toma
         S_SKIP_BYTE,         -- Estado para saltar un byte (operandos no usados)
@@ -277,6 +282,19 @@ begin
                     when x"40" | x"41" | x"42" =>
                         v_ctrl.Load_TMP_L := '1';
                         next_state <= S_EXEC_ADDR_FETCH_HI;
+
+                    -- LD SP, #nn (0x50)
+                    when x"50" =>
+                        v_ctrl.Load_TMP_L := '1';
+                        next_state <= S_EXEC_LDSP_1;
+
+                    -- LD SP, A:B (0x51)
+                    when x"51" =>
+                        next_state <= S_EXEC_LDSP_AB;
+
+                    -- ST SP_L, A (0x52) / ST SP_H, A (0x53)
+                    when x"52" | x"53" =>
+                        next_state <= S_EXEC_STSP_WB;
 
                     -- IN A, #n (0xD0) / OUT #n, A (0xD2)
                     when x"D0" | x"D2" =>
@@ -993,6 +1011,54 @@ begin
                 v_ctrl.Write_B := '1';
                 v_ctrl.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH)); -- R1 (B)
 
+                next_state <= S_FETCH;
+
+            -- -----------------------------------------------------------------
+            -- EJECUCIÓN: Manipulación del Stack Pointer (LD SP, ST SP)
+            -- -----------------------------------------------------------------
+            when S_EXEC_LDSP_1 =>
+                -- LD SP, #nn. Byte bajo ya en TMP_L (decodificación con Load_TMP_L).
+                -- Leer byte alto desde M[PC]
+                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                v_ctrl.Mem_RE     := '1';
+                v_ctrl.Load_TMP_H := '1';
+                v_ctrl.PC_Op      := PC_OP_INC;
+                next_state        <= S_EXEC_LDSP_2;
+
+            when S_EXEC_LDSP_2 =>
+                -- Cargar SP con valor de TMP
+                v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP
+                v_ctrl.SP_Op        := SP_OP_LOAD;
+                next_state          <= S_FETCH;
+
+            when S_EXEC_LDSP_AB =>
+                -- LD SP, A:B.
+                -- Usar EA Adder para pasar A:B (A:B + 0)
+                v_ctrl.EA_A_Sel     := EA_A_SRC_REG_AB;
+                v_ctrl.EA_B_Sel     := EA_B_SRC_ZERO;
+                v_ctrl.EA_Op        := EA_OP_ADD;
+                
+                -- Cargar SP con resultado EA
+                v_ctrl.Load_Src_Sel := '0'; -- Fuente = EA Adder
+                v_ctrl.SP_Op        := SP_OP_LOAD;
+                next_state          <= S_FETCH;
+
+            when S_EXEC_STSP_WB =>
+                -- ST SP_L, A (0x52) o ST SP_H, A (0x53).
+                -- Pasar SP por el EA Adder (SP + 0) para tenerlo en EA_Out
+                v_ctrl.EA_A_Sel := EA_A_SRC_SP;
+                v_ctrl.EA_B_Sel := EA_B_SRC_ZERO;
+                v_ctrl.EA_Op    := EA_OP_ADD;
+                
+                -- Escribir en A la parte seleccionada del resultado EA
+                if r_IR = x"52" then
+                    v_ctrl.Bus_Op := EA_LOW_elected;  -- SP[7:0]
+                else
+                    v_ctrl.Bus_Op := EA_HIGH_elected; -- SP[15:8]
+                end if;
+                
+                v_ctrl.Write_A := '1';
+                -- No afecta flags
                 next_state <= S_FETCH;
 
             -- -----------------------------------------------------------------
