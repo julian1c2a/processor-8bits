@@ -8,7 +8,7 @@ package DataPath_pkg is
 
     -- Constantes para Bus_Op (Selección de la fuente para el bus de escritura)
     constant ACC_ALU_elected  : std_logic_vector(1 downto 0) := b"00";
-    constant from_MDR_elected : std_logic_vector(1 downto 0) := b"01";
+    constant MEM_MDR_elected : std_logic_vector(1 downto 0) := b"01";
 
     -- Definición del Banco de Registros
     type register_file_t is array(0 to MSB_REGISTERS) of data_vector;
@@ -19,6 +19,27 @@ package DataPath_pkg is
     -- Aplica la máscara de actualización de flags:
     -- Retorna (current and not mask) OR (new and mask)
     function apply_flag_mask(current_flags : status_vector; new_flags : status_vector; mask : status_vector) return status_vector;
+
+    -- Componente
+    component DataPath_comp is
+        Port (
+            clk       : in std_logic;
+            reset     : in std_logic;
+            MemDataIn : in  data_vector;
+            MemDataOut: out data_vector;
+            IndexB_Out: out data_vector;
+            ALU_Op    : in  opcode_vector;
+            Bus_Op    : in  std_logic_vector(1 downto 0);
+            Write_A   : in  std_logic;
+            Write_B   : in  std_logic;
+            Reg_Sel   : in  std_logic_vector(MSB_REG_SEL downto 0);
+            Write_F   : in  std_logic;
+            Flag_Mask : in  status_vector;
+            MDR_WE    : in  std_logic;
+            Out_Sel   : in  std_logic;
+            FlagsOut  : out status_vector
+        );
+    end component DataPath_comp;
 
 end package DataPath_pkg;
 

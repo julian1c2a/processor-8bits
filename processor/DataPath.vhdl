@@ -13,6 +13,7 @@ entity DataPath is
         -- Bus de Datos con Memoria/IO
         MemDataIn : in  data_vector; -- Dato leído de memoria/IO
         MemDataOut: out data_vector; -- Dato a escribir en memoria/IO
+        IndexB_Out: out data_vector; -- Salida de RegB para el AddressPath
 
         -- Señales de Control (vienen de la UC)
         ALU_Op    : in  opcode_vector; -- Operación ALU
@@ -77,7 +78,7 @@ begin
     begin
         case Bus_Op is
             when ACC_ALU_elected  => Bus_Int <= ALU_Res;   -- Resultado ALU
-            when from_MDR_elected => Bus_Int <= MDR;       -- Dato de Memoria/IO (vía MDR)
+            when MEM_MDR_elected => Bus_Int <= MDR;       -- Dato de Memoria/IO (vía MDR)
             when others => Bus_Int <= (others => '0');
         end case;
     end process;
@@ -117,5 +118,6 @@ begin
     MemDataOut <= RegA when Out_Sel = '0' else RegB;
     
     FlagsOut   <= RegF;
+    IndexB_Out <= RegB;
 
 end architecture unique;
