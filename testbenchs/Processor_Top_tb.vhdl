@@ -139,7 +139,7 @@ begin
     -- Proceso de Estímulo
     stim_proc: process
     begin
-        report "=== INICIO SIMULACION PROCESADOR (Test Suma 16-bit ADD/ADC) ===";
+        report "=== INICIO SIMULACION PROCESADOR (Test ADD16) ===";
         
         -- Reset del sistema
         reset <= '1';
@@ -151,23 +151,23 @@ begin
         wait for clk_period * 60;
 
         report "--- Verificación ---";
-        -- Al final, PC debe estar en 0x0011 (HALT en 0x0010 + 1)
-        assert MemAddress = x"0011"
-            report "FAIL: El PC final no es correcto. Esperado 0x0011, obtenido: 0x" & to_hstring(MemAddress)
+        -- Al final, PC debe estar en 0x000E (HALT en 0x000D + 1)
+        assert MemAddress = x"000E"
+            report "FAIL: El PC final no es correcto. Esperado 0x000E, obtenido: 0x" & to_hstring(MemAddress)
             severity error;
             
-        -- 1. Byte bajo: 0xFF + 0x01 = 0x00
-        assert RAM(16#0100#) = x"00"
-            report "FAIL: Suma baja incorrecta. Esperado 0x00, Leído: 0x" & to_hstring(RAM(16#0100#))
+        -- 1. A (Alto) = 0x10 + 0x01 = 0x11
+        assert RAM(16#0100#) = x"11"
+            report "FAIL: ADD16 High (A) incorrecto. Esperado 0x11, Leído: 0x" & to_hstring(RAM(16#0100#))
             severity error;
 
-        -- 2. Byte alto: 0x00 + 0x00 + C(1) = 0x01
-        assert RAM(16#0101#) = x"01"
-            report "FAIL: Suma alta (ADC) incorrecta. Esperado 0x01, Leído: 0x" & to_hstring(RAM(16#0101#))
+        -- 2. B (Bajo) = 0x20 + 0x01 = 0x21
+        assert RAM(16#0101#) = x"21"
+            report "FAIL: ADD16 Low (B) incorrecto. Esperado 0x21, Leído: 0x" & to_hstring(RAM(16#0101#))
             severity error;
 
-        if (MemAddress = x"0011") and (RAM(16#0100#) = x"00") and (RAM(16#0101#) = x"01") then
-            report "PASS: Suma de 16 bits (ADD/ADC) verificada.";
+        if (MemAddress = x"000E") and (RAM(16#0100#) = x"11") and (RAM(16#0101#) = x"21") then
+            report "PASS: Instrucción ADD16 verificada.";
         end if;
 
         report "=== FIN DE SIMULACION ===";

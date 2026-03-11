@@ -88,7 +88,8 @@ architecture unique of ControlUnit is
         S_EXEC_OUT_WRITE,     -- OUT: Escribir en bus I/O
         
         S_EXEC_OP16_FETCH_1,  -- 16-bit Ops: Leer operando
-        S_EXEC_OP16_EXEC_WB,  -- 16-bit Ops: Ejecutar y Write-Back
+        S_EXEC_OP16_WB_1,     -- 16-bit Ops: Write-Back High (A) + Flags
+        S_EXEC_OP16_WB_2,     -- 16-bit Ops: Write-Back Low (B)
         
         S_EXEC_BRANCH_REL_1, -- BEQ rel8: Fetch operando y cálculo de dirección
         S_EXEC_BRANCH_REL_2, -- BEQ rel8: Carga de PC si salto se toma
@@ -800,30 +801,39 @@ begin
                 v_ctrl.Mem_RE     := '1';
                 v_ctrl.Load_TMP_H := '1';
                 v_ctrl.PC_Op      := PC_OP_INC;
-                next_state        <= S_EXEC_OP16_EXEC_WB;
+                next_state        <= S_EXEC_OP16_WB_1;
 
-            when S_EXEC_OP16_EXEC_WB =>
-                -- Ejecutar operación en AddressPath: TMP (operando) op A:B
+            when S_EXEC_OP16_WB_1 =>
+                -- Paso 1: Ejecutar, escribir Byte Alto en A y actualizar Flags
                 -- Configurar EA Adder: A=TMP, B=REG_AB.
                 v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
                 v_ctrl.EA_B_Sel := EA_B_SRC_REG_AB;
-                
-                if r_IR = x"E1" then
-                    v_ctrl.EA_Op := EA_OP_ADD; -- A:B + TMP
-                else -- SUB16
-                    -- Nota: Nuestra implementación actual hace TMP - A:B si usamos SUB.
-                    -- Para SUB16 A:B - nn, necesitamos A:B - TMP.
-                    -- Esto requiere ajustar el AddressPath para soportar A-B.
-                    -- Asumimos por ahora ADD16 funciona. SUB16 pendiente de HW fix exacto.
-                    v_ctrl.EA_Op := EA_OP_SUB; 
-                end if;
+                if r_IR = x"E1" then v_ctrl.EA_Op := EA_OP_ADD; else v_ctrl.EA_Op := EA_OP_SUB; end if;
 
-                -- Write Back a registros A y B
-                -- Escribir byte bajo (EA_LOW) en B, byte alto (EA_HIGH) en A.
-                -- Hack: Necesitamos 2 ciclos de escritura o doble puerto de escritura.
-                -- DataPath solo tiene 1 bus de escritura (Bus_Int).
-                -- Solución: Hacerlo en 2 ciclos WB.
-                -- (Dejamos pendiente la expansión a 2 ciclos WB para 16-bit ops).
+                -- Escribir EA_HIGH en A
+                v_ctrl.Bus_Op := EA_HIGH_elected;
+                v_ctrl.Write_A := '1';
+
+                -- Capturar flags de 16 bits ahora (antes de que A cambie y corrompa el cálculo)
+                v_ctrl.F_Src_Sel := '1'; -- Fuente = AddressPath
+                v_ctrl.Write_F   := '1';
+                v_ctrl.Flag_Mask := x"F0"; -- Actualizar C, V, Z (H no se usa en 16b)
+
+                next_state <= S_EXEC_OP16_WB_2;
+
+            when S_EXEC_OP16_WB_2 =>
+                -- Paso 2: Escribir Byte Bajo en B
+                -- Mantener configuración del sumador (aunque el resultado High sea inválido ahora porque A cambió,
+                -- el resultado Low sigue siendo válido porque solo depende de B y TMP_L).
+                v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
+                v_ctrl.EA_B_Sel := EA_B_SRC_REG_AB;
+                if r_IR = x"E1" then v_ctrl.EA_Op := EA_OP_ADD; else v_ctrl.EA_Op := EA_OP_SUB; end if;
+
+                -- Escribir EA_LOW en B
+                v_ctrl.Bus_Op  := EA_LOW_elected;
+                v_ctrl.Write_B := '1';
+                v_ctrl.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH)); -- R1 (B)
+
                 next_state <= S_FETCH;
 
             -- -----------------------------------------------------------------
