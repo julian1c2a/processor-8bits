@@ -14,6 +14,7 @@ entity ControlUnit is
         -- Inputs from DataPath/AddressPath
         FlagsIn  : in  status_vector;
         InstrIn  : in  data_vector; -- Instruction byte from memory
+        Mem_Ready: in  std_logic;   -- Wait state input (active high)
         
         -- Output to the rest of the processor
         CtrlBus  : out control_bus_t
@@ -891,6 +892,14 @@ begin
                 next_state <= S_FETCH;
 
         end case;
+
+        -- =====================================================================
+        -- Lógica de Wait States (Global Stall)
+        -- =====================================================================
+        -- Si estamos accediendo a memoria y esta no está lista, mantenemos el estado.
+        if (v_ctrl.Mem_RE = '1' or v_ctrl.Mem_WE = '1') and Mem_Ready = '0' then
+            next_state <= state;
+        end if;
 
         -- Asignación final
         CtrlBus <= v_ctrl;

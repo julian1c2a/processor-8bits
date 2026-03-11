@@ -50,6 +50,7 @@ entity Processor_Top is
         MemData_Out : out data_vector;
         Mem_WE      : out std_logic;
         Mem_RE      : out std_logic;
+        Mem_Ready   : in  std_logic; -- Señal de handshake para Wait States
 
         -- External IO Interface (simplificado, comparte buses)
         IO_WE       : out std_logic;
@@ -89,6 +90,7 @@ begin
             reset    => reset,
             FlagsIn  => s_Flags,
             InstrIn  => MemData_In, -- El byte de instrucción viene del bus de datos de memoria
+            Mem_Ready => Mem_Ready,
             CtrlBus  => s_CtrlBus
         );
 

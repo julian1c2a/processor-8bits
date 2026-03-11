@@ -30,6 +30,7 @@ architecture unique of Processor_Top_tb is
     signal MemData_Out : data_vector;
     signal Mem_WE      : std_logic;
     signal Mem_RE      : std_logic;
+    signal Mem_Ready   : std_logic := '0';
     signal IO_WE       : std_logic;
     signal IO_RE       : std_logic;
 
@@ -92,6 +93,9 @@ architecture unique of Processor_Top_tb is
 
     constant clk_period : time := 10 ns;
 
+    -- Simulación de latencia de SRAM
+    constant WAIT_STATES : integer := 4; -- 4 wait states + 1 ciclo acceso = 5 ciclos total
+
 begin
 
     -- Instancia del Procesador
@@ -104,6 +108,7 @@ begin
             MemData_Out => MemData_Out,
             Mem_WE      => Mem_WE,
             Mem_RE      => Mem_RE,
+            Mem_Ready   => Mem_Ready,
             IO_WE       => IO_WE,
             IO_RE       => IO_RE
         );
@@ -117,24 +122,45 @@ begin
         wait for clk_period/2;
     end process;
 
-    -- Modelo de Memoria Asíncrona (Simplificado)
-    mem_proc: process(MemAddress, Mem_RE, Mem_WE, MemData_Out)
+    -- Modelo de Memoria con Wait States
+    -- Simula una SRAM asíncrona que tarda N ciclos en responder.
+    -- El controlador de memoria (simulado aquí) gestiona el handshake Mem_Ready.
+    mem_proc: process(clk, reset)
         variable addr_int : integer;
+        variable wait_cnt : integer := 0;
     begin
-        addr_int := to_integer(unsigned(MemAddress));
-        
-        -- Lectura
-        if Mem_RE = '1' then
-            MemData_In <= RAM(addr_int);
-        else
-            MemData_In <= (others => 'Z'); -- Alta impedancia si no lee
-        end if;
-
-        -- Escritura (Síncrona o Asíncrona según modelo, aquí asíncrona para simplificar TB)
-        if Mem_WE = '1' then
-            RAM(addr_int) <= MemData_Out;
+        if reset = '1' then
+            Mem_Ready <= '0';
+            wait_cnt  := 0;
+            MemData_In <= (others => 'Z');
+        elsif rising_edge(clk) then
+            addr_int := to_integer(unsigned(MemAddress));
+            
+            -- Lógica de Wait States
+            if (Mem_RE = '1' or Mem_WE = '1') then
+                if wait_cnt < WAIT_STATES then
+                    wait_cnt := wait_cnt + 1;
+                    Mem_Ready <= '0';
+                else
+                    -- Memoria lista
+                    Mem_Ready <= '1';
+                    
+                    -- Escritura síncrona al final del ciclo de espera
+                    if Mem_WE = '1' then
+                        RAM(addr_int) <= MemData_Out;
+                    end if;
+                end if;
+            else
+                -- Bus inactivo
+                wait_cnt := 0;
+                Mem_Ready <= '0';
+            end if;
         end if;
     end process;
+
+    -- Lectura de datos: Conectada al bus cuando RE y Ready están activos
+    -- (o asumiendo que el dato es válido tras el tiempo de espera)
+    MemData_In <= RAM(to_integer(unsigned(MemAddress))) when (Mem_RE = '1' and Mem_Ready = '1') else (others => 'Z');
 
     -- Proceso de Estímulo
     stim_proc: process
@@ -148,7 +174,8 @@ begin
         report "--- Reset liberado, iniciando programa ---";
 
         -- Esperar un tiempo suficiente para que el programa se ejecute y se detenga en un HALT.
-        wait for clk_period * 60;
+        -- Al añadir wait states, cada instrucción tarda más. Aumentamos el tiempo de simulación.
+        wait for clk_period * 200;
 
         report "--- Verificación ---";
         -- Al final, PC debe estar en 0x001F (HALT en 0x001E + 1)

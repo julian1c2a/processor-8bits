@@ -103,6 +103,7 @@ end package ControlUnit_pkg;
             reset    : in  std_logic;
             FlagsIn  : in  status_vector;
             InstrIn  : in  data_vector;
+            Mem_Ready: in  std_logic; -- Handshake memoria (1=Dato válido/Escritura OK)
             CtrlBus  : out control_bus_t
         );
     end component ControlUnit_comp;

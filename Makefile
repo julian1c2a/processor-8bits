@@ -22,8 +22,21 @@ endif
 # Python interpreter
 PYTHON = python
 
-# VHDL files (ALU_pkg.vhdl must be analysed before ALU.vhdl and testbenches)
-VHDL_SRCS_PROC = $(SRCDIR_PROC)/ALU_pkg.vhdl $(SRCDIR_PROC)/ALU.vhdl
+# VHDL files - Compilation order matters!
+VHDL_SRCS_PROC = \
+    $(SRCDIR_PROC)/Utils_pkg.vhdl \
+    $(SRCDIR_PROC)/CONSTANTS_pkg.vhdl \
+    $(SRCDIR_PROC)/ALU_pkg.vhdl \
+    $(SRCDIR_PROC)/ALU_functions_pkg.vhdl \
+    $(SRCDIR_PROC)/DataPath_pkg.vhdl \
+    $(SRCDIR_PROC)/AddressPath_pkg.vhdl \
+    $(SRCDIR_PROC)/ControlUnit_pkg.vhdl \
+    $(SRCDIR_PROC)/ALU.vhdl \
+    $(SRCDIR_PROC)/DataPath.vhdl \
+    $(SRCDIR_PROC)/AddressPath.vhdl \
+    $(SRCDIR_PROC)/ControlUnit.vhdl \
+    $(SRCDIR_PROC)/Processor_Top.vhdl
+
 VHDL_SRCS_TB   = $(wildcard $(SRCDIR_TB)/*.vhdl)
 
 # Object files
@@ -37,8 +50,8 @@ MANUAL_TB_SRCS  = $(filter-out $(SRCDIR_TB)/ALU_exhaustive_tb.vhdl \
 TB_EXECS = $(patsubst $(SRCDIR_TB)/%_tb.vhdl, $(BUILDDIR_TESTS)/%_tb$(EXT), $(MANUAL_TB_SRCS))
 
 # Exhaustive test operations
-EX_OPS = NOP ADD ADC SUB SBB LSL LSR ROL ROR INC DEC AND OR XOR NOT ASL \
-         PA PB CL SET MUL MUH CMP ASR SWAP NEG INCB DECB
+EX_OPS = NOP ADD ADC SUB SBB LSL LSR ROL ROR INC DEC AND IOR XOR NOT ASL \
+         PSA PSB CLR SET MUL MUH CMP ASR SWP NEG INB DEB
 
 ifeq ($(OS),Windows_NT)
     EXT = .exe
@@ -61,6 +74,7 @@ compile: $(BUILDDIR) $(OBJS_PROC) $(OBJS_TB)
 test: $(TB_EXECS)
 	@echo "Running manual testbenches..."
 	@for tb in $(TB_EXECS); do \
+		echo "Executing $$tb..."; \
 		$$tb --wave=$(BUILDDIR)/$$(basename $$tb .exe).ghw; \
 	done
 
