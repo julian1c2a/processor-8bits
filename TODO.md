@@ -4,17 +4,6 @@ Este archivo lista las funcionalidades de la ISA v0.6 que aún no están impleme
 
 ---
 
-## Prioridad Alta (Funcionalidad Básica Faltante)
-
-- [x] **Instrucciones de 16 bits (`ADD16`, `SUB16`)**
-  - [x] Opcodes `0xE1` (#nn) y `0xE3` (#nn) implementados.
-  - [x] Variantes inmediatas cortas `0xE0` (#n) y `0xE2` (#n) implementadas.
-  - [x] Reutilización del AddressPath y lógica de flags completada.
-
-- [x] **Instrucciones con Carry (`ADC`, `SBB`)**
-  - [x] Opcodes `0x91`, `0x93`, `0xA1`, `0xA3`.
-  - [x] Implementado en ControlUnit. DataPath ya conectaba Carry_in a RegF(C), y la ALU discrimina internamente si usarlo o no según el opcode.
-
 ## Prioridad Media (Completar Sets de Instrucciones Faltantes)
 
 Muchas instrucciones están definidas en la ISA pero aún no tienen entrada en el `case` del decodificador de la UC.
