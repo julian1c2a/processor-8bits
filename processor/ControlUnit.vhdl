@@ -45,6 +45,13 @@ architecture Behavioral of ControlUnit is
         S_EXEC_ALU_IMM_1, -- ALU A, #n: Fetch inmediato
         S_EXEC_ALU_IMM_2, -- ALU A, #n: Execute & Write Back
         
+        S_EXEC_PUSH_1,    -- PUSH: Decrementar SP
+        S_EXEC_PUSH_2,    -- PUSH: Escribir byte bajo
+        S_EXEC_PUSH_3,    -- PUSH: Escribir byte alto (0x00)
+        
+        S_EXEC_POP_1,     -- POP: Leer byte bajo
+        S_EXEC_POP_2,     -- POP: Guardar en Reg y Incrementar SP
+        
         S_EXEC_BRANCH_REL_1, -- BEQ rel8: Fetch operando y cálculo de dirección
         S_EXEC_BRANCH_REL_2, -- BEQ rel8: Carga de PC si salto se toma
         S_SKIP_BYTE,         -- Estado para saltar un byte (operandos no usados)
@@ -147,9 +154,6 @@ begin
                     when x"A0" | x"A2" | x"A4" | x"A5" | x"A7" =>
                         next_state <= S_EXEC_ALU_IMM_1;
 
-                    -- BEQ rel8 (0x80)
-                    when x"80" =>
-                        if FlagsIn(idx_fZ) = '1' then next_state <= S_EXEC_BRANCH_REL_1; else next_state <= S_SKIP_BYTE; end if;
                     -- Saltos Condicionales (0x80 - 0x8B)
                     when x"80" | x"81" | x"82" | x"83" | x"84" | x"85" | 
                          x"86" | x"87" | x"88" | x"89" | x"8A" | x"8B" =>
@@ -175,6 +179,14 @@ begin
                         else
                             next_state <= S_SKIP_BYTE;
                         end if;
+
+                    -- PUSH A (0x60)
+                    when x"60" =>
+                        next_state <= S_EXEC_PUSH_1;
+
+                    -- POP A (0x64)
+                    when x"64" =>
+                        next_state <= S_EXEC_POP_1;
 
                     -- JP nn (0x70)
                     when x"70" =>
@@ -301,6 +313,49 @@ begin
                     when others => null;
                 end case;
                 next_state <= S_FETCH;
+
+            -- -----------------------------------------------------------------
+            -- EJECUCIÓN: PUSH A (0x60)
+            -- -----------------------------------------------------------------
+            when S_EXEC_PUSH_1 =>
+                -- Paso 1: Decrementar SP en 2 (Stack descendente, alineado a par)
+                v_ctrl.SP_Op := SP_OP_DEC;
+                next_state   <= S_EXEC_PUSH_2;
+
+            when S_EXEC_PUSH_2 =>
+                -- Paso 2: Escribir A en M[SP] (Little Endian: Byte bajo en dir baja)
+                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                v_ctrl.Mem_WE    := '1';
+                v_ctrl.Out_Sel   := OUT_SEL_A; -- Dato = RegA
+                v_ctrl.SP_Offset := '0';       -- Dir = SP
+                next_state       <= S_EXEC_PUSH_3;
+
+            when S_EXEC_PUSH_3 =>
+                -- Paso 3: Escribir 0x00 en M[SP+1]
+                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                v_ctrl.Mem_WE    := '1';
+                v_ctrl.Out_Sel   := OUT_SEL_ZERO; -- Dato = 0x00
+                v_ctrl.SP_Offset := '1';          -- Dir = SP + 1
+                next_state       <= S_FETCH;
+
+            -- -----------------------------------------------------------------
+            -- EJECUCIÓN: POP A (0x64)
+            -- -----------------------------------------------------------------
+            when S_EXEC_POP_1 =>
+                -- Paso 1: Leer byte bajo M[SP] hacia MDR
+                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                v_ctrl.Mem_RE    := '1';
+                v_ctrl.MDR_WE    := '1';
+                v_ctrl.SP_Offset := '0';
+                next_state       <= S_EXEC_POP_2;
+
+            when S_EXEC_POP_2 =>
+                -- Paso 2: Escribir MDR en A y restaurar SP (+2)
+                v_ctrl.Bus_Op  := MEM_MDR_elected;
+                v_ctrl.Write_A := '1';
+                v_ctrl.SP_Op   := SP_OP_INC; -- SP += 2
+                -- (Byte alto M[SP+1] se ignora en POP A de 8 bits)
+                next_state     <= S_FETCH;
 
             -- -----------------------------------------------------------------
             -- EJECUCIÓN: Salto Relativo Condicional (BEQ)

@@ -51,6 +51,7 @@ package AddressPath_pkg is
             Load_TMP_L: in  std_logic;
             Load_TMP_H: in  std_logic;
             Load_Src_Sel : in std_logic;
+            SP_Offset : in  std_logic;
             EA_A_Sel  : in  std_logic;
             EA_B_Sel  : in  std_logic
         );

@@ -40,6 +40,7 @@ entity AddressPath is
         
         -- Selección de fuente para cargar PC/SP/LR (Calculado vs Dato directo)
         Load_Src_Sel : in std_logic; -- 0=EA_Adder_Res, 1=TMP (Dato 16 bits ensamblado)
+        SP_Offset    : in std_logic; -- 0=SP, 1=SP+1 (para accesos de 16 bits secuenciales)
         
         -- Selección de operandos para el EA Adder
         EA_A_Sel  : in  std_logic;
@@ -153,7 +154,12 @@ begin
     begin
         case ABUS_Sel is
             when ABUS_SRC_PC  => AddressBus <= std_logic_vector(r_PC);
-            when ABUS_SRC_SP  => AddressBus <= std_logic_vector(r_SP);
+            when ABUS_SRC_SP  => 
+                if SP_Offset = '1' then
+                    AddressBus <= std_logic_vector(r_SP + 1);
+                else
+                    AddressBus <= std_logic_vector(r_SP);
+                end if;
             when ABUS_SRC_EAR => AddressBus <= std_logic_vector(r_EAR);
             when ABUS_SRC_LR  => AddressBus <= std_logic_vector(r_LR);
             when others       => AddressBus <= (others => '0');

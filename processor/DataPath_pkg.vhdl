@@ -10,6 +10,11 @@ package DataPath_pkg is
     constant ACC_ALU_elected  : std_logic_vector(1 downto 0) := b"00";
     constant MEM_MDR_elected : std_logic_vector(1 downto 0) := b"01";
 
+    -- Constantes para Out_Sel (Selección de dato a Memoria)
+    constant OUT_SEL_A    : std_logic_vector(1 downto 0) := b"00";
+    constant OUT_SEL_B    : std_logic_vector(1 downto 0) := b"01";
+    constant OUT_SEL_ZERO : std_logic_vector(1 downto 0) := b"10";
+
     -- Definición del Banco de Registros
     type register_file_t is array(0 to MSB_REGISTERS) of data_vector;
 
@@ -37,7 +42,7 @@ package DataPath_pkg is
             Flag_Mask : in  status_vector;
             MDR_WE    : in  std_logic;
             ALU_Bin_Sel : in std_logic;
-            Out_Sel   : in  std_logic;
+            Out_Sel   : in  std_logic_vector(1 downto 0);
             FlagsOut  : out status_vector
         );
     end component DataPath_comp;

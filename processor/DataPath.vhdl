@@ -41,7 +41,7 @@ entity DataPath is
         Flag_Mask : in  status_vector; -- Máscara para actualización parcial de flags (1=update)
         MDR_WE    : in  std_logic; -- Habilitar escritura en MDR (Memory Data Register)
         ALU_Bin_Sel : in std_logic; -- Selección entrada B ALU: 0=Reg, 1=MDR
-        Out_Sel   : in  std_logic; -- 0=RegA, 1=RegB para MemDataOut
+        Out_Sel   : in  std_logic_vector(1 downto 0); -- Selección salida: 00=A, 01=B, 10=Zero
         
         -- Salidas de Estado hacia la UC
         FlagsOut  : out status_vector -- Para saltos condicionales
@@ -150,8 +150,12 @@ begin
     -- =========================================================================
     -- 3. Salidas del DataPath
     -- =========================================================================
-    -- Selección de dato a escribir en memoria (ST A o ST B)
-    MemDataOut <= RegA when Out_Sel = '0' else RegB;
+    -- Selección de dato a escribir en memoria (ST A, ST B, o PUSH padding)
+    with Out_Sel select MemDataOut <=
+        RegA            when OUT_SEL_A,
+        RegB            when OUT_SEL_B,
+        (others => '0') when OUT_SEL_ZERO,
+        (others => '0') when others;
     
     FlagsOut   <= RegF;
     IndexB_Out <= RegB;

@@ -29,7 +29,7 @@ package ControlUnit_pkg is
         Flag_Mask   : status_vector;                -- Máscara de flags a actualizar
         MDR_WE      : std_logic;                    -- Write Enable para MDR (captura de memoria)
         ALU_Bin_Sel : std_logic;                    -- Selección entrada B ALU: 0=Reg, 1=MDR
-        Out_Sel     : std_logic;                    -- Selección dato salida a memoria (0=A, 1=B)
+        Out_Sel     : std_logic_vector(1 downto 0); -- Selección dato salida a memoria (00=A, 01=B, 10=Zero)
 
         -- === ADDRESS PATH ===
         PC_Op       : std_logic_vector(1 downto 0); -- Control PC (Hold, Inc, Load)
@@ -40,6 +40,7 @@ package ControlUnit_pkg is
         Load_TMP_L  : std_logic;                    -- Cargar TMP bajo
         Load_TMP_H  : std_logic;                    -- Cargar TMP alto
         Load_Src_Sel: std_logic;                    -- Fuente de carga para PC/SP (0=EA_Adder, 1=TMP)
+        SP_Offset   : std_logic;                    -- Offset para dirección de Stack (0=+0, 1=+1)
         EA_A_Sel    : std_logic;                    -- Selección entrada A del EA Adder (PC o TMP)
         EA_B_Sel    : std_logic;                    -- Selección entrada B del EA Adder (RegB o DataIn)
 
@@ -66,7 +67,7 @@ package ControlUnit_pkg is
         Flag_Mask   => (others => '0'),
         MDR_WE      => '0',
         ALU_Bin_Sel => '0', -- Por defecto usa operandos de registro
-        Out_Sel     => '0',
+        Out_Sel     => "00", -- Por defecto A
 
         -- Address Path
         PC_Op       => PC_OP_NOP,
@@ -77,6 +78,7 @@ package ControlUnit_pkg is
         Load_TMP_L  => '0',
         Load_TMP_H  => '0',
         Load_Src_Sel=> LOAD_SRC_ALU_RES,
+        SP_Offset   => '0',
         EA_A_Sel    => EA_A_SRC_TMP, -- Por defecto, EA usa TMP
         EA_B_Sel    => EA_B_SRC_REG_B, -- Por defecto, EA usa RegB
 
