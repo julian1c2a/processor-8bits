@@ -139,7 +139,7 @@ begin
     -- Proceso de Estímulo
     stim_proc: process
     begin
-        report "=== INICIO SIMULACION PROCESADOR (Test Unary: INC, DEC, NOT, NEG) ===";
+        report "=== INICIO SIMULACION PROCESADOR (Test Suma 16-bit ADD/ADC) ===";
         
         -- Reset del sistema
         reset <= '1';
@@ -148,46 +148,26 @@ begin
         report "--- Reset liberado, iniciando programa ---";
 
         -- Esperar un tiempo suficiente para que el programa se ejecute y se detenga en un HALT.
-        wait for clk_period * 50;
+        wait for clk_period * 60;
 
         report "--- Verificación ---";
-        -- Al final, PC debe estar en 0x0021 (HALT en 0x0020 + 1)
-        assert MemAddress = x"0021"
-            report "FAIL: El PC final no es correcto. Esperado 0x0021, obtenido: 0x" & to_hstring(MemAddress)
+        -- Al final, PC debe estar en 0x0011 (HALT en 0x0010 + 1)
+        assert MemAddress = x"0011"
+            report "FAIL: El PC final no es correcto. Esperado 0x0011, obtenido: 0x" & to_hstring(MemAddress)
             severity error;
             
-        -- 1. INC A: 0xFE -> 0xFF
-        assert RAM(16#0100#) = x"FF"
-            report "FAIL: INC incorrecto (no overflow). Esperado 0xFF, Leído: 0x" & to_hstring(RAM(16#0100#))
+        -- 1. Byte bajo: 0xFF + 0x01 = 0x00
+        assert RAM(16#0100#) = x"00"
+            report "FAIL: Suma baja incorrecta. Esperado 0x00, Leído: 0x" & to_hstring(RAM(16#0100#))
             severity error;
 
-        -- 2. INC A: 0xFF -> 0x00 (Overflow)
-        assert RAM(16#0101#) = x"00"
-            report "FAIL: INC incorrecto (overflow). Esperado 0x00, Leído: 0x" & to_hstring(RAM(16#0101#))
+        -- 2. Byte alto: 0x00 + 0x00 + C(1) = 0x01
+        assert RAM(16#0101#) = x"01"
+            report "FAIL: Suma alta (ADC) incorrecta. Esperado 0x01, Leído: 0x" & to_hstring(RAM(16#0101#))
             severity error;
 
-        -- 3. DEC A: 0x01 -> 0x00
-        assert RAM(16#0102#) = x"00"
-            report "FAIL: DEC incorrecto (no borrow). Esperado 0x00, Leído: 0x" & to_hstring(RAM(16#0102#))
-            severity error;
-
-        -- 4. DEC A: 0x00 -> 0xFF (Borrow)
-        assert RAM(16#0103#) = x"FF"
-            report "FAIL: DEC incorrecto (borrow). Esperado 0xFF, Leído: 0x" & to_hstring(RAM(16#0103#))
-            severity error;
-
-        -- 5. NOT A: ~0xAA -> 0x55
-        assert RAM(16#0104#) = x"55"
-            report "FAIL: NOT incorrecto. Esperado 0x55, Leído: 0x" & to_hstring(RAM(16#0104#))
-            severity error;
-
-        -- 6. NEG A: -0x01 -> 0xFF
-        assert RAM(16#0105#) = x"FF"
-            report "FAIL: NEG incorrecto. Esperado 0xFF, Leído: 0x" & to_hstring(RAM(16#0105#))
-            severity error;
-
-        if (MemAddress = x"0021") and (RAM(16#0100#) = x"FF") and (RAM(16#0101#) = x"00") and (RAM(16#0102#) = x"00") and (RAM(16#0103#) = x"FF") and (RAM(16#0104#) = x"55") and (RAM(16#0105#) = x"FF") then
-            report "PASS: Operaciones Unarias (INC/DEC/NOT/NEG) verificadas.";
+        if (MemAddress = x"0011") and (RAM(16#0100#) = x"00") and (RAM(16#0101#) = x"01") then
+            report "PASS: Suma de 16 bits (ADD/ADC) verificada.";
         end if;
 
         report "=== FIN DE SIMULACION ===";

@@ -29,6 +29,7 @@ entity DataPath is
         MemDataIn : in  data_vector; -- Dato leído de memoria/IO
         MemDataOut: out data_vector; -- Dato a escribir en memoria/IO
         IndexB_Out: out data_vector; -- Salida de RegB para el AddressPath
+        RegA_Out  : out data_vector; -- Salida directa de A para AddressPath
         PC_In     : in  address_vector; -- Entrada del PC para guardar en Stack
 
         -- Señales de Control (vienen de la UC)
@@ -44,6 +45,9 @@ entity DataPath is
         ALU_Bin_Sel : in std_logic; -- Selección entrada B ALU: 0=Reg, 1=MDR
         Out_Sel   : in  std_logic_vector(2 downto 0); -- Selección salida: A, B, Zero, PCL, PCH
         Load_F_Direct : in std_logic; -- Carga directa de Flags desde Bus_Int (POP F)
+        EA_In     : in  address_vector; -- Entrada de resultado de 16 bits desde AddressPath
+        EA_Flags_In : in status_vector; -- Flags generados por AddressPath
+        F_Src_Sel : in  std_logic;      -- Selección fuente flags: 0=ALU, 1=AddressPath
         
         -- Salidas de Estado hacia la UC
         FlagsOut  : out status_vector -- Para saltos condicionales
@@ -74,6 +78,7 @@ architecture unique of DataPath is
     signal ALU_Stat : status_vector;
     signal Bus_Int  : data_vector; -- Bus interno de escritura (resultado mux)
     signal ALU_OpB  : data_vector; -- Operando B seleccionado
+    signal New_Flags: status_vector; -- Flags seleccionados (ALU o EA)
 
 begin
 
@@ -109,6 +114,8 @@ begin
             when ACC_ALU_elected  => Bus_Int <= ALU_Res;   -- Resultado ALU
             when MEM_MDR_elected => Bus_Int <= MDR;       -- Dato de Memoria/IO (vía MDR)
             when others => Bus_Int <= (others => '0');
+            when EA_LOW_elected   => Bus_Int <= EA_In(7 downto 0);
+            when EA_HIGH_elected  => Bus_Int <= EA_In(15 downto 8);
         end case;
     end process;
 
@@ -141,7 +148,10 @@ begin
                 RegF <= Bus_Int(status_vector'range);
             elsif Write_F = '1' then
                 -- Actualización con máscara: (Old and NOT Mask) OR (New and Mask)
-                RegF <= apply_flag_mask(RegF, ALU_Stat, Flag_Mask);
+                -- Seleccionar fuente de flags
+                if F_Src_Sel = '1' then New_Flags <= EA_Flags_In; else New_Flags <= ALU_Stat; end if;
+                
+                RegF <= apply_flag_mask(RegF, New_Flags, Flag_Mask);
             end if;
 
             -- Escritura MDR (Captura de dato de memoria)
@@ -167,5 +177,6 @@ begin
     
     FlagsOut   <= RegF;
     IndexB_Out <= RegB;
+    RegA_Out   <= RegA;
 
 end architecture unique;

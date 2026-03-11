@@ -35,6 +35,11 @@ package AddressPath_pkg is
     constant EA_B_SRC_REG_B   : std_logic_vector(1 downto 0) := "00"; -- Índice = Registro B
     constant EA_B_SRC_DATA_IN : std_logic_vector(1 downto 0) := "01"; -- Índice = Dato de Memoria (rel8)
     constant EA_B_SRC_ZERO    : std_logic_vector(1 downto 0) := "10"; -- Índice = 0
+    constant EA_B_SRC_REG_AB  : std_logic_vector(1 downto 0) := "11"; -- Índice = A:B (16 bits)
+
+    -- Operación del EA Adder
+    constant EA_OP_ADD : std_logic := '0';
+    constant EA_OP_SUB : std_logic := '1';
 
     -- Componente
     component AddressPath_comp is
@@ -43,8 +48,11 @@ package AddressPath_pkg is
             reset     : in std_logic;
             DataIn    : in  data_vector;
             Index_B   : in  data_vector;
+            Index_A   : in  data_vector; -- Registro A para operaciones 16-bit
             AddressBus : out address_vector;
             PC_Out    : out address_vector; -- Salida del PC actual hacia DataPath
+            EA_Out    : out address_vector; -- Resultado EA hacia DataPath
+            EA_Flags  : out status_vector;  -- Flags de la operación EA (C, V, Z)
             PC_Op     : in  std_logic_vector(1 downto 0);
             SP_Op     : in  std_logic_vector(1 downto 0);
             ABUS_Sel  : in  std_logic_vector(1 downto 0);
@@ -56,7 +64,8 @@ package AddressPath_pkg is
             Clear_TMP : in  std_logic;
             SP_Offset : in  std_logic;
             EA_A_Sel  : in  std_logic;
-            EA_B_Sel  : in  std_logic_vector(1 downto 0)
+            EA_B_Sel  : in  std_logic_vector(1 downto 0);
+            EA_Op     : in  std_logic
         );
     end component AddressPath_comp;
 

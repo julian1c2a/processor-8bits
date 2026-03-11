@@ -29,6 +29,7 @@ package ControlUnit_pkg is
         Flag_Mask   : status_vector;                -- Máscara de flags a actualizar
         MDR_WE      : std_logic;                    -- Write Enable para MDR (captura de memoria)
         ALU_Bin_Sel : std_logic;                    -- Selección entrada B ALU: 0=Reg, 1=MDR
+        F_Src_Sel   : std_logic;                    -- Fuente Flags: 0=ALU, 1=AddressPath
         Load_F_Direct : std_logic;                  -- Carga directa de Flags desde Bus_Int (para POP F)
         Out_Sel     : std_logic_vector(2 downto 0); -- Selección dato salida a memoria (A, B, Zero, PC_L, PC_H)
 
@@ -45,6 +46,7 @@ package ControlUnit_pkg is
         Clear_TMP   : std_logic;                    -- Poner a cero el registro TMP del AddressPath
         EA_A_Sel    : std_logic;                    -- Selección entrada A del EA Adder (PC o TMP)
         EA_B_Sel    : std_logic_vector(1 downto 0); -- Selección entrada B del EA Adder (RegB, DataIn, Zero)
+        EA_Op       : std_logic;                    -- Operación EA Adder: 0=ADD, 1=SUB
 
         -- === MEMORIA / IO ===
         Mem_WE      : std_logic;                    -- Write Enable Memoria
@@ -69,6 +71,7 @@ package ControlUnit_pkg is
         Flag_Mask   => (others => '0'),
         MDR_WE      => '0',
         ALU_Bin_Sel => '0', -- Por defecto usa operandos de registro
+        F_Src_Sel   => '0',
         Load_F_Direct => '0',
         Out_Sel     => "000", -- Por defecto A
 
@@ -85,6 +88,7 @@ package ControlUnit_pkg is
         SP_Offset   => '0',
         EA_A_Sel    => EA_A_SRC_TMP, -- Por defecto, EA usa TMP
         EA_B_Sel    => EA_B_SRC_REG_B, -- Por defecto, EA usa RegB
+        EA_Op       => EA_OP_ADD,
 
         -- Mem/IO
         Mem_WE      => '0', Mem_RE => '0',

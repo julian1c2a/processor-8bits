@@ -72,7 +72,10 @@ architecture Structural of Processor_Top is
     signal s_AddressBus : address_vector;
     signal s_DataPath_DataOut : data_vector;
     signal s_DataPath_IndexB  : data_vector;
+    signal s_DataPath_RegA    : data_vector; -- Nuevo: Salida A
     signal s_AddressPath_PC   : address_vector; -- PC del AddressPath al DataPath
+    signal s_AddressPath_EA   : address_vector; -- Nuevo: Resultado EA
+    signal s_AddressPath_Flags: status_vector;  -- Nuevo: Flags EA
 
 begin
 
@@ -99,8 +102,11 @@ begin
             reset        => reset,
             DataIn       => MemData_In, -- Para cargar TMP desde memoria (ej. JP nn)
             Index_B      => s_DataPath_IndexB, -- Desde RegB del DataPath
+            Index_A      => s_DataPath_RegA,   -- Desde RegA del DataPath
             AddressBus   => s_AddressBus,
             PC_Out       => s_AddressPath_PC, -- Exportar PC para CALL/PUSH
+            EA_Out       => s_AddressPath_EA, -- Resultado operación 16-bit
+            EA_Flags     => s_AddressPath_Flags,
             -- Señales de control desde la UC
             PC_Op        => s_CtrlBus.PC_Op,
             SP_Op        => s_CtrlBus.SP_Op,
@@ -114,6 +120,7 @@ begin
             SP_Offset    => s_CtrlBus.SP_Offset,
             EA_A_Sel     => s_CtrlBus.EA_A_Sel,
             EA_B_Sel     => s_CtrlBus.EA_B_Sel
+            EA_Op        => s_CtrlBus.EA_Op
         );
 
     -- ========================================================================
@@ -127,6 +134,7 @@ begin
             MemDataIn => MemData_In,
             MemDataOut=> s_DataPath_DataOut,
             IndexB_Out=> s_DataPath_IndexB, -- Salida de RegB para el AddressPath
+            RegA_Out  => s_DataPath_RegA,
             PC_In     => s_AddressPath_PC,  -- Entrada de PC desde AddressPath
             FlagsOut  => s_Flags,
             -- Señales de control desde la UC

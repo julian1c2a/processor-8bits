@@ -9,6 +9,8 @@ package DataPath_pkg is
     -- Constantes para Bus_Op (Selección de la fuente para el bus de escritura)
     constant ACC_ALU_elected  : std_logic_vector(1 downto 0) := b"00";
     constant MEM_MDR_elected : std_logic_vector(1 downto 0) := b"01";
+    constant EA_LOW_elected   : std_logic_vector(1 downto 0) := b"10"; -- Byte bajo del resultado EA
+    constant EA_HIGH_elected  : std_logic_vector(1 downto 0) := b"11"; -- Byte alto del resultado EA
 
     -- Constantes para Out_Sel (Selección de dato a Memoria)
     constant OUT_SEL_A    : std_logic_vector(2 downto 0) := b"000";
@@ -36,6 +38,7 @@ package DataPath_pkg is
             MemDataIn : in  data_vector;
             MemDataOut: out data_vector;
             IndexB_Out: out data_vector;
+            RegA_Out  : out data_vector; -- Salida directa de A para AddressPath
             PC_In     : in  address_vector; -- Entrada del PC actual para guardar en stack
             ALU_Op    : in  opcode_vector;
             Bus_Op    : in  std_logic_vector(1 downto 0);
@@ -48,6 +51,9 @@ package DataPath_pkg is
             ALU_Bin_Sel : in std_logic;
             Out_Sel   : in  std_logic_vector(2 downto 0);
             Load_F_Direct : in std_logic;
+            EA_In     : in  address_vector; -- Entrada de resultado de 16 bits desde AddressPath
+            EA_Flags_In : in status_vector; -- Flags generados por AddressPath
+            F_Src_Sel : in  std_logic;      -- Selección fuente flags: 0=ALU, 1=AddressPath
             FlagsOut  : out status_vector
         );
     end component DataPath_comp;
