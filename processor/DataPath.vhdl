@@ -40,6 +40,7 @@ entity DataPath is
         Write_F   : in  std_logic; -- Habilitar actualización de Flags
         Flag_Mask : in  status_vector; -- Máscara para actualización parcial de flags (1=update)
         MDR_WE    : in  std_logic; -- Habilitar escritura en MDR (Memory Data Register)
+        ALU_Bin_Sel : in std_logic; -- Selección entrada B ALU: 0=Reg, 1=MDR
         Out_Sel   : in  std_logic; -- 0=RegA, 1=RegB para MemDataOut
         
         -- Salidas de Estado hacia la UC
@@ -91,8 +92,8 @@ begin
     );
 
     -- MUX Entrada B ALU:
-    -- Permite flexibilidad total: ALU puede operar A con cualquier Rn.
-    ALU_OpB <= Registers(to_register_index(Reg_Sel));
+    -- Permite flexibilidad total: ALU puede operar A con cualquier Rn o con MDR (inmediato).
+    ALU_OpB <= Registers(to_register_index(Reg_Sel)) when ALU_Bin_Sel = '0' else MDR;
 
     -- =========================================================================
     -- 2. Lógica de Write-Back (Escritura en Registros)

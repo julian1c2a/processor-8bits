@@ -28,6 +28,7 @@ package ControlUnit_pkg is
         Write_F     : std_logic;                    -- Actualizar Flags
         Flag_Mask   : status_vector;                -- Máscara de flags a actualizar
         MDR_WE      : std_logic;                    -- Write Enable para MDR (captura de memoria)
+        ALU_Bin_Sel : std_logic;                    -- Selección entrada B ALU: 0=Reg, 1=MDR
         Out_Sel     : std_logic;                    -- Selección dato salida a memoria (0=A, 1=B)
 
         -- === ADDRESS PATH ===
@@ -62,6 +63,7 @@ package ControlUnit_pkg is
         Write_F     => '0',
         Flag_Mask   => (others => '0'),
         MDR_WE      => '0',
+        ALU_Bin_Sel => '0', -- Por defecto usa operandos de registro
         Out_Sel     => '0',
 
         -- Address Path

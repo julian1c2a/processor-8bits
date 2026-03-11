@@ -36,6 +36,7 @@ package DataPath_pkg is
             Write_F   : in  std_logic;
             Flag_Mask : in  status_vector;
             MDR_WE    : in  std_logic;
+            ALU_Bin_Sel : in std_logic;
             Out_Sel   : in  std_logic;
             FlagsOut  : out status_vector
         );

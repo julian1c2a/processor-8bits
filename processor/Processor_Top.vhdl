@@ -131,6 +131,7 @@ begin
             Write_F   => s_CtrlBus.Write_F,
             Flag_Mask => s_CtrlBus.Flag_Mask,
             MDR_WE    => s_CtrlBus.MDR_WE,
+            ALU_Bin_Sel => s_CtrlBus.ALU_Bin_Sel,
             Out_Sel   => s_CtrlBus.Out_Sel
         );
 
