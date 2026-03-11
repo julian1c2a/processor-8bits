@@ -38,31 +38,27 @@ architecture unique of Processor_Top_tb is
     
     -- Inicialización de la memoria con un PROGRAMA DE PRUEBA
     signal RAM : ram_type := (
-        -- Programa para probar BEQ
-        -- 1. Carga A y B con el mismo valor (5)
-        -- 2. Compara A y B (debe activar Z flag)
-        -- 3. Salta si es igual (BEQ) a la etiqueta 'target'
-        -- 4. Si el salto falla, cae en un HALT de error.
-        -- 5. Si el salto funciona, cae en un HALT de éxito en 'target'.
+        -- TEST: CALL y RET
+        -- Flujo esperado: 0x0000 -> 0x0002 (CALL) -> 0x0010 (Sub) -> 0x0012 (RET) -> 0x0005 -> 0x0007 (HALT)
         
-        -- Dir 0x0000: LD A, #5
-        16#0000# => x"11", 16#0001# => x"05",
+        -- 0x0000: LD A, #0x10      (A = 16)
+        16#0000# => x"11", 16#0001# => x"10",
         
-        -- Dir 0x0002: LD B, #5
-        16#0002# => x"21", 16#0003# => x"05",
+        -- 0x0002: CALL 0x0010      (Llamada a subrutina, guarda ret=0x0005 en stack)
+        16#0002# => x"75", 16#0003# => x"10", 16#0004# => x"00",
         
-        -- Dir 0x0004: CMP A, B  (A=5, B=5 -> Z flag se pone a 1)
-        16#0004# => x"97",
+        -- 0x0005: ADD A, #0x02     (A += 2. Si A era 17, ahora 19)
+        16#0005# => x"A0", 16#0006# => x"02",
         
-        -- Dir 0x0005: BEQ +1 (Branch if Equal. PC estará en 0x0007. 0x0007 + 1 = 0x0008. El salto se toma)
-        16#0005# => x"80", 16#0006# => x"01",
-        
-        -- Dir 0x0007: HALT (Error: el salto no se tomó)
+        -- 0x0007: HALT             (Fin del programa)
         16#0007# => x"01",
         
-        -- target: (at 0x0008)
-        -- Dir 0x0008: HALT (Éxito: el procesador se detiene aquí)
-        16#0008# => x"01",
+        -- --- SUBRUTINA en 0x0010 ---
+        -- 0x0010: ADD A, #0x01     (A += 1)
+        16#0010# => x"A0", 16#0011# => x"01",
+
+        -- 0x0012: RET              (Retorna a 0x0005)
+        16#0012# => x"77",
         
         others => x"00" -- Resto a 0 (NOP)
     );
@@ -116,7 +112,7 @@ begin
     -- Proceso de Estímulo
     stim_proc: process
     begin
-        report "=== INICIO SIMULACION PROCESADOR (Test de Salto Condicional) ===";
+        report "=== INICIO SIMULACION PROCESADOR (Test CALL/RET) ===";
         
         -- Reset del sistema
         reset <= '1';
@@ -129,12 +125,33 @@ begin
 
         report "--- Verificación ---";
         -- Al final de la simulación, el PC debe estar en 0x0008, en un bucle HALT.
-        -- Si está en 0x0007, el salto condicional falló.
+        -- (La instrucción HALT está en 0x0007, tras decodificarla PC avanza a 0x0008)
         assert MemAddress = x"0008"
-            report "FAIL: El salto condicional no se tomó o fue incorrecto. PC final: 0x" & to_hstring(MemAddress)
+            report "FAIL: El PC final no es correcto. Esperado 0x0008 (HALT tras retorno), obtenido: 0x" & to_hstring(MemAddress)
             severity error;
             
-        report "PASS: El salto condicional BEQ se ejecutó correctamente. PC final en 0x0008."
+        -- Verificación del Stack:
+        -- CALL guarda la dirección de retorno (0x0005) en el stack.
+        -- Stack empieza en 0xFFFE.
+        -- PUSH Low (0x05) en 0xFFFC.
+        -- PUSH High (0x00) en 0xFFFD.
+        -- (AddressPath decrementa SP primero, luego escribe. SP final en subrutina es 0xFFFC).
+        
+        assert RAM(16#FFFC#) = x"05"
+            report "FAIL: Stack Low Byte incorrecto. Esperado 0x05, Leído: 0x" & to_hstring(RAM(16#FFFC#))
+            severity error;
+
+        assert RAM(16#FFFD#) = x"00"
+            report "FAIL: Stack High Byte incorrecto. Esperado 0x00, Leído: 0x" & to_hstring(RAM(16#FFFD#))
+            severity error;
+
+        if (MemAddress = x"0008") and (RAM(16#FFFC#) = x"05") then
+            report "PASS: Ciclo CALL/RET verificado exitosamente.";
+        end if;
+
+        report "=== FIN DE SIMULACION ===";
+        std.env.stop; -- Detener la simulación en GHDL
+    end process;
             severity note;
 
         report "=== FIN DE SIMULACION ===";
