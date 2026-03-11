@@ -428,8 +428,7 @@ begin
 
                     -- JPN page8 (0x72)
                     when x"72" =>
-                        v_ctrl.Load_TMP_L := '1';
-                        next_state <= S_EXEC_JPN;
+                        next_state <= S_EXEC_JPN_1;
 
                     -- JP ([nn]) (0x73)
                     when x"73" =>
@@ -762,10 +761,20 @@ begin
                 next_state          <= S_FETCH;
 
             -- -----------------------------------------------------------------
-            -- EJECUCIÓN: JPN page8 (0x72)
+            -- EJECUCIÓN: JPN page8 (0x72) - Salto en la misma página
             -- -----------------------------------------------------------------
-            when S_EXEC_JPN =>
-                -- TMP_L ya tiene el operando page8 (leído en FETCH).
+            when S_EXEC_JPN_1 =>
+                -- PC apunta al operando page8. Lo leemos y lo cargamos en TMP_L.
+                -- También incrementamos PC para que apunte a la siguiente instrucción.
+                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                v_ctrl.Mem_RE     := '1';
+                v_ctrl.Load_TMP_L := '1';
+                v_ctrl.Clear_TMP  := '1'; -- Aseguramos que TMP_H es 0
+                v_ctrl.PC_Op      := PC_OP_INC;
+                next_state        <= S_EXEC_JPN_2;
+
+            when S_EXEC_JPN_2 =>
+                -- TMP_L tiene el operando page8.
                 -- Cargamos TMP en PC, pero solo el byte bajo.
                 -- El byte alto de PC se conserva.
                 v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP (byte bajo)
