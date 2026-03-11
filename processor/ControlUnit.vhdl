@@ -106,8 +106,9 @@ architecture unique of ControlUnit is
         S_EXEC_OUT_WRITE,     -- OUT: Escribir en bus I/O
         
         S_EXEC_OP16_FETCH_1,  -- 16-bit Ops: Leer operando
-        S_EXEC_OP16_WB_1,     -- 16-bit Ops: Write-Back High (A) + Flags
-        S_EXEC_OP16_WB_2,     -- 16-bit Ops: Write-Back Low (B)
+        S_EXEC_OP16_IMM8_WB1, -- 16-bit Ops #n: Exec & Write-Back High
+        S_EXEC_OP16_WB_1,     -- 16-bit Ops #nn: Write-Back High (A) + Flags
+        S_EXEC_OP16_WB_2,     -- 16-bit Ops: Write-Back Low (B) Common
         
         S_EXEC_BRANCH_REL_1, -- BEQ rel8: Fetch operando y cálculo de dirección
         S_EXEC_BRANCH_REL_2, -- BEQ rel8: Carga de PC si salto se toma
@@ -281,10 +282,18 @@ begin
                         -- Direccionamiento indirecto [B]. B ya está en el registro.
                         next_state <= S_EXEC_IO_SETUP_REG;
 
+                    -- ADD16 #n (0xE0), SUB16 #n (0xE2)
+                    when x"E0" | x"E2" =>
+                        -- El operando está en PC+1 (siguiente ciclo). Vamos a fetch/exec.
+                        next_state <= S_EXEC_OP16_IMM8_WB1;
+
                     -- ADD16 #nn (0xE1), SUB16 #nn (0xE3)
-                    -- Implementaremos solo la versión #nn por simplicidad inicial
                     when x"E1" | x"E3" =>
+                        -- Fetch primer byte a TMP_L.
                         v_ctrl.Load_TMP_L := '1';
+                        v_ctrl.Mem_RE     := '1'; -- Necesario activar lectura aquí para latchear en TMP
+                        v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                        v_ctrl.PC_Op      := PC_OP_INC;
                         next_state <= S_EXEC_OP16_FETCH_1;
 
                     -- ALU Register Ops (A op B) -> A
@@ -874,6 +883,28 @@ begin
             -- -----------------------------------------------------------------
             -- EJECUCIÓN: Operaciones 16-bit (ADD16, SUB16)
             -- -----------------------------------------------------------------
+            when S_EXEC_OP16_IMM8_WB1 =>
+                -- Ops #n (0xE0, 0xE2). PC apunta al operando inmediato 8-bit.
+                -- Leer operando (DataIn), Sign-Extend y operar con A:B.
+                v_ctrl.ABUS_Sel := ABUS_SRC_PC;
+                v_ctrl.Mem_RE   := '1';
+                v_ctrl.PC_Op    := PC_OP_INC;
+
+                -- Configurar EA Adder: A=A:B, B=DataIn(sext).
+                v_ctrl.EA_A_Sel := EA_A_SRC_REG_AB;
+                v_ctrl.EA_B_Sel := EA_B_SRC_DATA_IN;
+                if r_IR = x"E0" then v_ctrl.EA_Op := EA_OP_ADD; else v_ctrl.EA_Op := EA_OP_SUB; end if;
+
+                -- Write-Back A (High) y Flags
+                v_ctrl.Bus_Op    := EA_HIGH_elected;
+                v_ctrl.Write_A   := '1';
+                v_ctrl.F_Src_Sel := '1'; -- Flags desde EA
+                v_ctrl.Write_F   := '1';
+                v_ctrl.Flag_Mask := x"F0";
+
+                -- Siguiente: Escribir B. Reutilizamos el estado WB_2 común.
+                next_state <= S_EXEC_OP16_WB_2;
+
             when S_EXEC_OP16_FETCH_1 =>
                 -- Ya tenemos TMP_L (byte bajo operando). Leemos byte alto -> TMP_H.
                 v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
@@ -884,9 +915,9 @@ begin
 
             when S_EXEC_OP16_WB_1 =>
                 -- Paso 1: Ejecutar, escribir Byte Alto en A y actualizar Flags
-                -- Configurar EA Adder: A=TMP, B=REG_AB.
-                v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
-                v_ctrl.EA_B_Sel := EA_B_SRC_REG_AB;
+                -- Configurar EA Adder: A=A:B, B=TMP.
+                v_ctrl.EA_A_Sel := EA_A_SRC_REG_AB;
+                v_ctrl.EA_B_Sel := EA_B_SRC_TMP;
                 if r_IR = x"E1" then v_ctrl.EA_Op := EA_OP_ADD; else v_ctrl.EA_Op := EA_OP_SUB; end if;
 
                 -- Escribir EA_HIGH en A
@@ -904,10 +935,15 @@ begin
                 -- Paso 2: Escribir Byte Bajo en B
                 -- Mantener configuración del sumador (aunque el resultado High sea inválido ahora porque A cambió,
                 -- el resultado Low sigue siendo válido porque solo depende de B y TMP_L).
-                v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
-                v_ctrl.EA_B_Sel := EA_B_SRC_REG_AB;
-                if r_IR = x"E1" then v_ctrl.EA_Op := EA_OP_ADD; else v_ctrl.EA_Op := EA_OP_SUB; end if;
+                v_ctrl.EA_A_Sel := EA_A_SRC_REG_AB;
+                if r_IR = x"E0" or r_IR = x"E2" then
+                    v_ctrl.EA_B_Sel := EA_B_SRC_DATA_IN; -- Para #n, necesitamos mantener el dato en bus
+                    v_ctrl.Mem_RE   := '1'; -- Mantener lectura (o asumir dato estable si es síncrono/latch)
+                else
+                    v_ctrl.EA_B_Sel := EA_B_SRC_TMP;     -- Para #nn, dato en TMP
+                end if;
 
+                if r_IR = x"E0" or r_IR = x"E1" then v_ctrl.EA_Op := EA_OP_ADD; else v_ctrl.EA_Op := EA_OP_SUB; end if;
                 -- Escribir EA_LOW en B
                 v_ctrl.Bus_Op  := EA_LOW_elected;
                 v_ctrl.Write_B := '1';
@@ -956,6 +992,33 @@ begin
                 v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
                 v_ctrl.Mem_RE     := '1';
                 v_ctrl.Load_TMP_H := '1';       -- Cargar en TMP[15:8]
+                v_ctrl.PC_Op      := PC_OP_INC; -- Avanzar
+                next_state        <= S_EXEC_JP_3;
+
+            when S_EXEC_JP_3 =>
+                v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP
+                v_ctrl.PC_Op        := PC_OP_LOAD;
+                next_state          <= S_FETCH;
+
+            when others =>
+                next_state <= S_FETCH;
+
+        end case;
+
+        -- =====================================================================
+        -- Lógica de Wait States (Global Stall)
+        -- =====================================================================
+        -- Si estamos accediendo a memoria y esta no está lista, mantenemos el estado.
+        if (v_ctrl.Mem_RE = '1' or v_ctrl.Mem_WE = '1') and Mem_Ready = '0' then
+            next_state <= state;
+        end if;
+
+        -- Asignación final
+        CtrlBus <= v_ctrl;
+        
+    end process;
+
+end architecture Behavioral;TMP_H := '1';       -- Cargar en TMP[15:8]
                 v_ctrl.PC_Op      := PC_OP_INC; -- Avanzar
                 next_state        <= S_EXEC_JP_3;
 
