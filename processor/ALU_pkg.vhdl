@@ -11,6 +11,12 @@ package ALU_pkg is
     subtype opcode_vector is std_logic_vector(4 downto 0);
     subtype status_vector is std_logic_vector(7 downto 0);
 
+    -- Tipo de retorno para funciones de la ALU: par (Valor, Flags)
+    type alu_result_record is record
+        acc    : data_vector;
+        status : status_vector;
+    end record;
+
     constant OP_NOP  : opcode_vector := b"00000"; -- No Operation
     constant OP_ADD  : opcode_vector := b"00001"; -- ADD
     constant OP_ADC  : opcode_vector := b"00010"; -- ADD with Carry
