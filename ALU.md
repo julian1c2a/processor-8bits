@@ -62,8 +62,8 @@ end entity ALU;
 | `NEG`  | `10000` | `0x10` | `ACC ← −A` (complemento a dos: 0−A) | C(borrow), H(borrow), V, Z |
 | `INC`  | `01001` | `0x09` | `ACC ← A + 1` | C, H, V, Z |
 | `DEC`  | `01010` | `0x0A` | `ACC ← A - 1` | C(borrow), H(borrow), V, Z |
-| `INCB` | `11010` | `0x1A` | `ACC ← B + 1` (UC enruta resultado a B) | C, H, V, Z |
-| `DECB` | `11011` | `0x1B` | `ACC ← B - 1` (UC enruta resultado a B) | C(borrow), H(borrow), V, Z |
+| `INB` | `11010` | `0x1A` | `ACC ← B + 1` (UC enruta resultado a B) | C, H, V, Z |
+| `DEB` | `11011` | `0x1B` | `ACC ← B - 1` (UC enruta resultado a B) | C(borrow), H(borrow), V, Z |
 | `MUL`  | `10101` | `0x15` | `ACC ← (A × B)[7:0]` | C si producto > 255, Z |
 | `MUH`  | `10110` | `0x16` | `ACC ← (A × B)[15:8]` | C si byte alto ≠ 0, Z |
 
@@ -77,7 +77,7 @@ end entity ALU;
 | `ROR`  | `01000` | `0x08` | `ACC ← A(0) & A(7:1)` | Z |
 | `ASL`  | `01111` | `0x0F` | `ACC ← A(6:0) & '0'` (aritmético) | V si cambia signo, L, Z |
 | `ASR`  | `11000` | `0x18` | `ACC ← A(7) & A(7:1)` (aritmético) | R, Z |
-| `SWAP` | `11001` | `0x19` | `ACC ← A(3:0) & A(7:4)` | Z |
+| `SWP` | `11001` | `0x19` | `ACC ← A(3:0) & A(7:4)` | Z |
 
 > **ASL vs LSL:** producen el mismo resultado en bits, pero ASL activa el flag V cuando el bit de signo cambia (desbordamiento en multiplicación ×2 con signo).
 
@@ -86,7 +86,7 @@ end entity ALU;
 | Mnemónico | Opcode (bin) | Opcode (hex) | Operación | Flags adicionales |
 |:---:|:---:|:---:|:---|:---|
 | `AND`  | `01011` | `0x0B` | `ACC ← A AND B` | Z |
-| `OR`   | `01100` | `0x0C` | `ACC ← A OR B` | Z |
+| `IOR`   | `01100` | `0x0C` | `ACC ← A OR B` | Z |
 | `XOR`  | `01101` | `0x0D` | `ACC ← A XOR B` | Z |
 | `NOT`  | `01110` | `0x0E` | `ACC ← NOT A` | Z |
 
@@ -95,9 +95,9 @@ end entity ALU;
 | Mnemónico | Opcode (bin) | Opcode (hex) | Operación | Flags adicionales |
 |:---:|:---:|:---:|:---|:---|
 | `NOP`  | `00000` | `0x00` | Sin operación | — |
-| `PA`   | `10001` | `0x11` | `ACC ← A` | Z |
-| `PB`   | `10010` | `0x12` | `ACC ← B` | Z |
-| `CL`   | `10011` | `0x13` | `ACC ← 0x00` | Z=1 |
+| `PSA`   | `10001` | `0x11` | `ACC ← A` | Z |
+| `PSB`   | `10010` | `0x12` | `ACC ← B` | Z |
+| `CLR`   | `10011` | `0x13` | `ACC ← 0x00` | Z=1 |
 | `SET`  | `10100` | `0x14` | `ACC ← 0xFF` | Z=0 |
 | `CMP`  | `10111` | `0x17` | Compara A-B, ACC no cambia | C, H, V, Z |
 

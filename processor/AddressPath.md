@@ -18,11 +18,11 @@ Este bloque implementa la aritmética de punteros y el flujo de programa. Contie
 
 ### Sumador EA (Effective Address Adder)
 
-Unidad aritmética combinacional de 16 bits dedicada.
+Unidad aritmética combinacional de 16 bits dedicada y flexible.
 
-* **Entrada A:** Registro `TMP` (Base).
-* **Entrada B:** `Index_B` (proveniente del DataPath, extendido a 16 bits sin signo).
-* **Función:** `Resultado = TMP + Index_B`.
+* **Entrada A (Base):** Multiplexada entre `TMP` y `PC`.
+* **Entrada B (Índice):** Multiplexada entre `Index_B` (del DataPath), `DataIn` (para saltos relativos) y `0`.
+* **Función:** `Resultado = Base + Índice`.
 * **Uso:** Cálculo de direcciones indexadas (`[nn+B]`), saltos relativos (`PC + rel8`), etc.
 
 ## Control del Bus de Direcciones (`ABUS_Sel`)
@@ -32,7 +32,7 @@ El bus de salida `AddressBus` se multiplexa entre las fuentes internas:
 * `ABUS_SRC_PC` (00): Fetch de instrucciones.
 * `ABUS_SRC_SP` (01): Operaciones de Stack (PUSH/POP).
 * `ABUS_SRC_EAR` (10): Accesos a datos calculados (LD/ST).
-* `ABUS_SRC_LR` (11): Retorno rápido (optimización).
+* `ABUS_SRC_EA_RES` (11): Salida directa del resultado del sumador EA.
 
 ## Diagrama de Flujo de Datos
 

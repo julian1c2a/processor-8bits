@@ -18,6 +18,7 @@ El diseño separa limpiamente el flujo de datos (8 bits) del flujo de control/di
 1. **Bus de Control (`CtrlBus`):** Un registro (record) masivo que transporta todas las micro-órdenes desde la UC hacia los dataregions. Definido en `ControlUnit_pkg`.
 2. **Flags (`s_Flags`):** Feedback desde el DataPath (ALU) hacia la UC para la toma de decisiones (saltos condicionales).
 3. **Índice B (`s_DataPath_IndexB`):** Conexión directa desde el registro B del DataPath hacia el sumador EA del AddressPath para permitir direccionamiento indexado (`[nn+B]`).
+4. **PC (`s_AddressPath_PC`):** Conexión desde el PC del AddressPath hacia el DataPath para permitir guardar la dirección de retorno en la pila (`PUSH PC` durante `CALL`).
 
 ## Interfaz Externa
 

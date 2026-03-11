@@ -1,10 +1,10 @@
 # Testbenches
 
-Este directorio contiene los testbenches VHDL y el oráculo Python para verificar la ALU.
+Este directorio contiene los testbenches VHDL y herramientas de soporte para verificar el procesador a nivel de componente (ALU) y de sistema (Processor_Top).
 
 ---
 
-## Archivos
+## Archivos Principales
 
 | Archivo | Descripción |
 |---|---|
@@ -12,6 +12,7 @@ Este directorio contiene los testbenches VHDL y el oráculo Python para verifica
 | `ALU_exhaustive_tb.vhdl` | Testbench exhaustivo genérico (lee vectores desde CSV) |
 | `alu_ref.py` | Oráculo Python: genera vectores de test para todas las operaciones |
 | `vectors/` | CSVs generados por `alu_ref.py` (no versionados, ver `.gitignore`) |
+| `Processor_Top_tb.vhdl` | Testbench de sistema completo con RAM simulada. |
 
 ---
 
@@ -62,6 +63,23 @@ mingw32-make build/build_tests/ALU_exhaustive_tb.exe
 # Ejecutar todas las operaciones (desde Makefile)
 mingw32-make test-exhaustive
 ```
+
+---
+
+## Processor_Top_tb.vhdl — Testbench de Sistema
+
+Este testbench instancia la entidad `Processor_Top` completa y la conecta a una memoria RAM simulada.
+
+### Funcionamiento
+
+1. **RAM Simulada:** Se declara una señal de tipo `array` que modela los 64KB de memoria del procesador.
+2. **Carga de Programa:** El programa de prueba se "carga" directamente en la RAM durante la inicialización del testbench.
+3. **Ejecución:** Se aplica un pulso de `reset` y se deja que el procesador ejecute el programa cargado.
+4. **Verificación:** Al final de la simulación, se usan sentencias `assert` para verificar:
+    - La posición final del Program Counter (PC).
+    - El contenido de posiciones de memoria específicas que el programa debía modificar.
+
+Este enfoque permite crear pruebas dirigidas para verificar la correcta implementación de cada instrucción y modo de direccionamiento en la Unidad de Control.
 
 ---
 
