@@ -1,7 +1,9 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use work.CONSTANTS_pkg.ALL;
 use work.ALU_pkg.ALL;
+use work.DataPath_pkg.ALL;
 
 entity DataPath is
     Port (
@@ -18,7 +20,11 @@ entity DataPath is
         
         Write_A   : in  std_logic; -- Habilitar escritura en A
         Write_B   : in  std_logic; -- Habilitar escritura en B
+        Reg_Sel   : in  std_logic_vector(MSB_REG_SEL downto 0); -- Selección registro operando B
         Write_F   : in  std_logic; -- Habilitar actualización de Flags
+        Flag_Mask : in  status_vector; -- Máscara para actualización parcial de flags (1=update)
+        MDR_WE    : in  std_logic; -- Habilitar escritura en MDR (Memory Data Register)
+        Out_Sel   : in  std_logic; -- 0=RegA, 1=RegB para MemDataOut
         
         -- Salidas de Estado hacia la UC
         FlagsOut  : out status_vector -- Para saltos condicionales
@@ -29,15 +35,22 @@ architecture unique of DataPath is
 
     for all : ALU_comp use entity work.ALU(unique);
 
+    -- Definición del Banco de Registros (8 registros de 8 bits)
+    signal Registers : register_file_t := (others => (others => '0'));
+
+    -- Alias para mantener compatibilidad con lógica existente de A y B
+    alias RegA is Registers(0);
+    alias RegB is Registers(1);
+
     -- Registros internos
-    signal RegA   : data_vector := (others => '0');
-    signal RegB   : data_vector := (others => '0');
     signal RegF   : status_vector := (others => '0'); -- Flags
+    signal MDR    : data_vector := (others => '0');   -- Memory Data Register
 
     -- Señales internas
     signal ALU_Res  : data_vector;
     signal ALU_Stat : status_vector;
     signal Bus_Int  : data_vector; -- Bus interno de escritura (resultado mux)
+    signal ALU_OpB  : data_vector; -- Operando B seleccionado
 
 begin
 
@@ -47,20 +60,24 @@ begin
     Inst_ALU: ALU_comp 
     Port map (
         RegInA    => RegA,
-        RegInB    => RegB,
+        RegInB    => ALU_OpB, -- Entrada B multiplexada
         Oper      => ALU_Op,
-        Carry_in  => RegF(7), -- Carry actual
+        Carry_in  => RegF(idx_fC), -- Carry actual
         RegOutACC => ALU_Res,
         RegStatus => ALU_Stat
     );
 
+    -- Multiplexor para la entrada B de la ALU (selecciona R0..R7)
+    -- Por defecto, la UC pondrá 1 (RegB) para instrucciones estándar
+    ALU_OpB <= Registers(to_register_index(Reg_Sel));
+
     -- 2. Multiplexor de Write-Back (Qué dato escribimos en los registros)
     -- Esto implementa la lógica de selección de fuente
-    process(Bus_Op, ALU_Res, MemDataIn)
+    process(Bus_Op, ALU_Res, MDR)
     begin
         case Bus_Op is
-            when b"00" => Bus_Int <= ALU_Res;   -- Resultado ALU
-            when b"01" => Bus_Int <= MemDataIn; -- Dato de Memoria/IO
+            when ACC_ALU_elected  => Bus_Int <= ALU_Res;   -- Resultado ALU
+            when from_MDR_elected => Bus_Int <= MDR;       -- Dato de Memoria/IO (vía MDR)
             when others => Bus_Int <= (others => '0');
         end case;
     end process;
@@ -69,8 +86,7 @@ begin
     process(clk, reset)
     begin
         if reset = '1' then
-            RegA <= (others => '0');
-            RegB <= (others => '0');
+            Registers <= (others => (others => '0'));
             RegF <= (others => '0');
         elsif rising_edge(clk) then
             -- Escritura A
@@ -78,20 +94,28 @@ begin
                 RegA <= Bus_Int;
             end if;
 
-            -- Escritura B
+            -- Escritura en Registro General (R0..R7 seleccionado por Reg_Sel)
             if Write_B = '1' then
-                RegB <= Bus_Int;
+                Registers(to_register_index(Reg_Sel)) <= Bus_Int;
             end if;
 
             -- Escritura Flags (Status)
             if Write_F = '1' then
-                RegF <= ALU_Stat;
+                -- Actualización con máscara: (Old and NOT Mask) OR (New and Mask)
+                RegF <= apply_flag_mask(RegF, ALU_Stat, Flag_Mask);
+            end if;
+
+            -- Escritura MDR (Captura de dato de memoria)
+            if MDR_WE = '1' then
+                MDR <= MemDataIn;
             end if;
         end if;
     end process;
 
     -- 4. Salidas
-    MemDataOut <= RegA; -- Normalmente STORE guarda A (o B, requiere mux salida)
+    -- Selección de dato a escribir en memoria (ST A o ST B)
+    MemDataOut <= RegA when Out_Sel = '0' else RegB;
+    
     FlagsOut   <= RegF;
 
 end architecture unique;
