@@ -47,7 +47,7 @@ entity AddressPath is
         SP_Offset    : in std_logic; -- 0=SP, 1=SP+1 (para accesos de 16 bits secuenciales)
         
         -- Selección de operandos para el EA Adder
-        EA_A_Sel  : in  std_logic;
+        EA_A_Sel  : in  std_logic_vector(1 downto 0);
         Clear_TMP : in  std_logic;
         EA_B_Sel  : in  std_logic_vector(1 downto 0);
         EA_Op     : in  std_logic -- 0=ADD, 1=SUB
@@ -79,13 +79,17 @@ begin
     -- ========================================================================
     
     -- Multiplexor para la entrada A (Base) del sumador
-    EA_Adder_A_In <= r_PC when EA_A_Sel = EA_A_SRC_PC else r_TMP;
+    with EA_A_Sel select EA_Adder_A_In <=
+        r_TMP                           when EA_A_SRC_TMP,
+        r_PC                            when EA_A_SRC_PC,
+        resize(unsigned(Index_A & Index_B), 16) when EA_A_SRC_REG_AB,
+        (others => '0')                 when others;
     
     -- Multiplexor para la entrada B (Índice) del sumador
     with EA_B_Sel select EA_Adder_B_In <= 
         resize(unsigned(Index_B), 16) when EA_B_SRC_REG_B,
         resize(signed(DataIn), 16)    when EA_B_SRC_DATA_IN,
-        resize(unsigned(Index_A & Index_B), 16) when EA_B_SRC_REG_AB,
+        resize(signed(r_TMP), 16)     when EA_B_SRC_TMP,
         (others => '0')               when others;
 
     -- Calcula: Base (TMP) + Índice (B extendido)

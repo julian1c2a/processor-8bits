@@ -1018,31 +1018,4 @@ begin
         
     end process;
 
-end architecture Behavioral;TMP_H := '1';       -- Cargar en TMP[15:8]
-                v_ctrl.PC_Op      := PC_OP_INC; -- Avanzar
-                next_state        <= S_EXEC_JP_3;
-
-            when S_EXEC_JP_3 =>
-                v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP
-                v_ctrl.PC_Op        := PC_OP_LOAD;
-                next_state          <= S_FETCH;
-
-            when others =>
-                next_state <= S_FETCH;
-
-        end case;
-
-        -- =====================================================================
-        -- Lógica de Wait States (Global Stall)
-        -- =====================================================================
-        -- Si estamos accediendo a memoria y esta no está lista, mantenemos el estado.
-        if (v_ctrl.Mem_RE = '1' or v_ctrl.Mem_WE = '1') and Mem_Ready = '0' then
-            next_state <= state;
-        end if;
-
-        -- Asignación final
-        CtrlBus <= v_ctrl;
-        
-    end process;
-
 end architecture Behavioral;

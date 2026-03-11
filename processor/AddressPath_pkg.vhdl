@@ -34,13 +34,14 @@ package AddressPath_pkg is
     constant LOAD_SRC_DATA_IN : std_logic := '1'; -- Dato directo (LD SP, #nnnn)
 
     -- Seleccion de fuentes para el EA Adder (para saltos relativos)
-    constant EA_A_SRC_TMP : std_logic := '0'; -- Base = TMP
-    constant EA_A_SRC_PC  : std_logic := '1'; -- Base = PC
+    constant EA_A_SRC_TMP    : std_logic_vector(1 downto 0) := "00"; -- Base = TMP
+    constant EA_A_SRC_PC     : std_logic_vector(1 downto 0) := "01"; -- Base = PC
+    constant EA_A_SRC_REG_AB : std_logic_vector(1 downto 0) := "10"; -- Base = A:B
 
     constant EA_B_SRC_REG_B   : std_logic_vector(1 downto 0) := "00"; -- Índice = Registro B
     constant EA_B_SRC_DATA_IN : std_logic_vector(1 downto 0) := "01"; -- Índice = Dato de Memoria (rel8)
     constant EA_B_SRC_ZERO    : std_logic_vector(1 downto 0) := "10"; -- Índice = 0
-    constant EA_B_SRC_REG_AB  : std_logic_vector(1 downto 0) := "11"; -- Índice = A:B (16 bits)
+    constant EA_B_SRC_TMP     : std_logic_vector(1 downto 0) := "11"; -- Índice = TMP (16 bits)
 
     -- Operación del EA Adder
     constant EA_OP_ADD : std_logic := '0';
@@ -68,7 +69,7 @@ package AddressPath_pkg is
             Load_Src_Sel : in std_logic;
             Clear_TMP : in  std_logic;
             SP_Offset : in  std_logic;
-            EA_A_Sel  : in  std_logic;
+            EA_A_Sel  : in  std_logic_vector(1 downto 0);
             EA_B_Sel  : in  std_logic_vector(1 downto 0);
             EA_Op     : in  std_logic
         );
