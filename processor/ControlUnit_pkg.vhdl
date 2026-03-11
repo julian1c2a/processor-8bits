@@ -36,7 +36,7 @@ package ControlUnit_pkg is
         -- === ADDRESS PATH ===
         PC_Op       : std_logic_vector(1 downto 0); -- Control PC (Hold, Inc, Load)
         SP_Op       : std_logic_vector(1 downto 0); -- Control SP (Hold, Inc, Dec, Load)
-        ABUS_Sel    : std_logic_vector(1 downto 0); -- Fuente del Bus de Direcciones (PC, SP, EAR...)
+        ABUS_Sel    : std_logic_vector(2 downto 0); -- Fuente del Bus de Direcciones (PC, SP, EAR, VECTORS...)
         Load_LR     : std_logic;                    -- Cargar Link Register
         Load_EAR    : std_logic;                    -- Cargar Effective Address Register
         Load_TMP_L  : std_logic;                    -- Cargar TMP bajo
@@ -104,6 +104,8 @@ end package ControlUnit_pkg;
             FlagsIn  : in  status_vector;
             InstrIn  : in  data_vector;
             Mem_Ready: in  std_logic; -- Handshake memoria (1=Dato válido/Escritura OK)
+            IRQ      : in  std_logic; -- Interrupt Request (Maskable)
+            NMI      : in  std_logic; -- Non-Maskable Interrupt
             CtrlBus  : out control_bus_t
         );
     end component ControlUnit_comp;

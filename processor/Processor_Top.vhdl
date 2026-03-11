@@ -54,7 +54,9 @@ entity Processor_Top is
 
         -- External IO Interface (simplificado, comparte buses)
         IO_WE       : out std_logic;
-        IO_RE       : out std_logic
+        IO_RE       : out std_logic;
+        IRQ         : in  std_logic := '0'; -- Default to 0 if unconnected
+        NMI         : in  std_logic := '0'
     );
 end entity Processor_Top;
 
@@ -91,6 +93,8 @@ begin
             FlagsIn  => s_Flags,
             InstrIn  => MemData_In, -- El byte de instrucción viene del bus de datos de memoria
             Mem_Ready => Mem_Ready,
+            IRQ      => IRQ,
+            NMI      => NMI,
             CtrlBus  => s_CtrlBus
         );
 

@@ -15,6 +15,8 @@ entity ControlUnit is
         FlagsIn  : in  status_vector;
         InstrIn  : in  data_vector; -- Instruction byte from memory
         Mem_Ready: in  std_logic;   -- Wait state input (active high)
+        IRQ      : in  std_logic;   -- Interrupt Request
+        NMI      : in  std_logic;   -- Non-Maskable Interrupt
         
         -- Output to the rest of the processor
         CtrlBus  : out control_bus_t
@@ -73,6 +75,21 @@ architecture unique of ControlUnit is
         S_EXEC_RET_2,     -- RET: Leer PC HIGH desde Stack
         S_EXEC_RET_3,     -- RET: Cargar PC y restaurar SP
 
+        S_EXEC_RTI_1,     -- RTI: Pop F (read)
+        S_EXEC_RTI_2,     -- RTI: Pop F (write) + Pop PC L (read)
+        S_EXEC_RTI_3,     -- RTI: Pop PC L (store) + Pop PC H (read)
+        S_EXEC_RTI_4,     -- RTI: Pop PC H (store/load PC)
+
+        S_INT_PUSH_PC_1,  -- INT Entry: Push PC (SP dec)
+        S_INT_PUSH_PC_2,  -- INT Entry: Push PC Low
+        S_INT_PUSH_PC_3,  -- INT Entry: Push PC High
+        S_INT_PUSH_F_1,   -- INT Entry: Push F (SP dec)
+        S_INT_PUSH_F_2,   -- INT Entry: Push F (Write F)
+        S_INT_PUSH_F_3,   -- INT Entry: Push F (Write 00)
+        S_INT_VEC_1,      -- INT Entry: Fetch Vector Low
+        S_INT_VEC_2,      -- INT Entry: Fetch Vector High
+        S_INT_VEC_3,      -- INT Entry: Load PC
+
         S_EXEC_ADDR_FETCH_HI, -- LD/ST [nn] o [nn+B]: Leer byte alto de la dirección base
         S_EXEC_PZ_FETCH,      -- LD/ST [n]: Cargar dirección de página cero en TMP
         S_EXEC_INDB_SETUP,    -- LD/ST [B]: Preparar TMP para cálculo de dirección
@@ -105,6 +122,10 @@ architecture unique of ControlUnit is
     
     -- Registro de Instrucción (Opcode)
     signal r_IR : data_vector;
+    
+    -- Registros internos de la UC
+    signal I_Flag : std_logic := '0'; -- Interrupt Enable Flag (0=Disabled, 1=Enabled)
+    signal handling_nmi : std_logic := '0'; -- Estado interno para distinguir NMI vs IRQ durante vector fetch
 
 begin
 
@@ -116,6 +137,7 @@ begin
         if reset = '1' then
             state <= S_RESET;
             r_IR  <= (others => '0');
+            I_Flag <= '0'; -- Interrupciones deshabilitadas al inicio
         elsif rising_edge(clk) then
             state <= next_state;
             
@@ -150,7 +172,15 @@ begin
                 -- Acceso a Memoria: Leer Opcode en [PC]
                 v_ctrl.ABUS_Sel := ABUS_SRC_PC;
                 v_ctrl.Mem_RE   := '1';
-                next_state      <= S_DECODE;
+                
+                -- Chequeo de Interrupciones (Prioridad: NMI > IRQ)
+                -- Si hay espera de memoria (Mem_Ready=0), no cambiamos de estado,
+                -- pero la decisión de ir a INT o DECODE se hace cuando se completa el fetch.
+                if (NMI = '1') or (IRQ = '1' and I_Flag = '1') then
+                    next_state <= S_INT_PUSH_PC_1; -- Ir a secuencia de interrupción
+                else
+                    next_state <= S_DECODE;
+                end if;
 
             when S_DECODE =>
                 -- En este punto, r_IR tiene el opcode actual.
@@ -167,6 +197,15 @@ begin
                     -- HALT (0x01)
                     when x"01" => 
                         next_state <= S_EXEC_HALT;
+                        
+                    -- SEI (0x04) / CLI (0x05)
+                    when x"04" | x"05" =>
+                        -- Lógica en proceso secuencial (I_Flag)
+                        next_state <= S_FETCH;
+                        
+                    -- RTI (0x06)
+                    when x"06" =>
+                        next_state <= S_EXEC_RTI_1;
 
                     -- LD A, B (0x10)
                     when x"10" =>
@@ -635,6 +674,43 @@ begin
                 v_ctrl.PC_Op        := PC_OP_LOAD;
                 v_ctrl.SP_Op        := SP_OP_INC; -- SP += 2
                 next_state          <= S_FETCH;
+
+            -- -----------------------------------------------------------------
+            -- EJECUCIÓN: RTI (0x06)
+            -- Secuencia inversa a INT Entry: Pop F, Pop PC
+            -- Stack: [SP]=Flags, [SP+1]=00, [SP+2]=PC_L, [SP+3]=PC_H
+            -- -----------------------------------------------------------------
+            when S_EXEC_RTI_1 =>
+                -- 1. Leer Flags desde M[SP]
+                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                v_ctrl.SP_Offset := '0';
+                v_ctrl.Mem_RE    := '1';
+                v_ctrl.MDR_WE    := '1';
+                next_state       <= S_EXEC_RTI_2;
+                
+            when S_EXEC_RTI_2 =>
+                -- 2. Restaurar F, Inc SP (skip padding), Leer PC_L (que está en SP+2 ahora)
+                v_ctrl.Bus_Op        := MEM_MDR_elected;
+                v_ctrl.Load_F_Direct := '1'; -- F <- MDR
+                v_ctrl.SP_Op         := SP_OP_INC; -- SP += 2 (apunta a PC_L)
+                next_state           <= S_EXEC_RTI_3;
+                
+            when S_EXEC_RTI_3 =>
+                -- 3. Leer PC_L desde M[SP] -> TMP_L
+                v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
+                v_ctrl.SP_Offset  := '0';
+                v_ctrl.Mem_RE     := '1';
+                v_ctrl.Load_TMP_L := '1';
+                next_state        <= S_EXEC_RTI_4;
+                
+            when S_EXEC_RTI_4 =>
+                -- 4. Leer PC_H desde M[SP+1] -> TMP_H
+                v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
+                v_ctrl.SP_Offset  := '1';
+                v_ctrl.Mem_RE     := '1';
+                v_ctrl.Load_TMP_H := '1';
+                -- Next state: Load PC from TMP + Final SP adjust
+                next_state        <= S_INT_VEC_3; -- Reutilizamos estado final de carga PC
 
             -- -----------------------------------------------------------------
             -- EJECUCIÓN: LD A, [nn] y ST A, [nn]

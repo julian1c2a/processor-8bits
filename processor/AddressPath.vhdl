@@ -34,7 +34,7 @@ entity AddressPath is
         -- Señales de Control (vienen de UC)
         PC_Op     : in  std_logic_vector(1 downto 0); -- Control PC (Inc, Load...)
         SP_Op     : in  std_logic_vector(1 downto 0); -- Control SP (Inc, Dec, Load...)
-        ABUS_Sel  : in  std_logic_vector(1 downto 0); -- Quién controla el AddressBus
+        ABUS_Sel  : in  std_logic_vector(2 downto 0); -- Quién controla el AddressBus
         
         -- Cargas de registros específicos
         Load_LR   : in  std_logic; -- Cargar Link Register
@@ -201,6 +201,10 @@ begin
                 end if;
             when ABUS_SRC_EAR => AddressBus <= std_logic_vector(r_EAR);
             when ABUS_SRC_EA_RES => AddressBus <= std_logic_vector(EA_Adder_Res);
+            when ABUS_SRC_VEC_NMI_L => AddressBus <= x"FFFA";
+            when ABUS_SRC_VEC_NMI_H => AddressBus <= x"FFFB";
+            when ABUS_SRC_VEC_IRQ_L => AddressBus <= x"FFFE";
+            when ABUS_SRC_VEC_IRQ_H => AddressBus <= x"FFFF";
             when others       => AddressBus <= (others => '0');
         end case;
     end process;

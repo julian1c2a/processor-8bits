@@ -18,10 +18,15 @@ package AddressPath_pkg is
     constant SP_OP_LOAD : std_logic_vector(1 downto 0) := "11"; -- Cargar valor
 
     -- Seleccion de la fuente para el Bus de Direcciones (ABUS)
-    constant ABUS_SRC_PC  : std_logic_vector(1 downto 0) := "00"; -- Fetch instrucciones
-    constant ABUS_SRC_SP  : std_logic_vector(1 downto 0) := "01"; -- Stack Ops
-    constant ABUS_SRC_EAR : std_logic_vector(1 downto 0) := "10"; -- Effective Address (LD/ST)
-    constant ABUS_SRC_EA_RES : std_logic_vector(1 downto 0) := "11"; -- Salida directa del sumador EA
+    constant ABUS_SRC_PC  : std_logic_vector(2 downto 0) := "000"; -- Fetch instrucciones
+    constant ABUS_SRC_SP  : std_logic_vector(2 downto 0) := "001"; -- Stack Ops
+    constant ABUS_SRC_EAR : std_logic_vector(2 downto 0) := "010"; -- Effective Address (LD/ST)
+    constant ABUS_SRC_EA_RES : std_logic_vector(2 downto 0) := "011"; -- Salida directa del sumador EA
+    -- Vectores de interrupción (Hardcoded)
+    constant ABUS_SRC_VEC_NMI_L : std_logic_vector(2 downto 0) := "100"; -- 0xFFFA
+    constant ABUS_SRC_VEC_NMI_H : std_logic_vector(2 downto 0) := "101"; -- 0xFFFB
+    constant ABUS_SRC_VEC_IRQ_L : std_logic_vector(2 downto 0) := "110"; -- 0xFFFE
+    constant ABUS_SRC_VEC_IRQ_H : std_logic_vector(2 downto 0) := "111"; -- 0xFFFF
 
     -- Seleccion de la fuente para cargar datos en registros internos (PC, LR, EAR)
     -- Usualmente viene de: Resultado del EA-Adder, Bus de Datos (concatenado), o Registros internos
@@ -55,7 +60,7 @@ package AddressPath_pkg is
             EA_Flags  : out status_vector;  -- Flags de la operación EA (C, V, Z)
             PC_Op     : in  std_logic_vector(1 downto 0);
             SP_Op     : in  std_logic_vector(1 downto 0);
-            ABUS_Sel  : in  std_logic_vector(1 downto 0);
+            ABUS_Sel  : in  std_logic_vector(2 downto 0);
             Load_LR   : in  std_logic;
             Load_EAR  : in  std_logic;
             Load_TMP_L: in  std_logic;
