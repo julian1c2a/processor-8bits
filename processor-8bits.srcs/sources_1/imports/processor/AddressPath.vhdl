@@ -39,15 +39,11 @@ entity AddressPath is
         Load_TMP_H: in  std_logic; -- Cargar parte alta de TMP (desde DataIn)
         
         -- Selección de fuente para cargar PC/SP/LR (Calculado vs Dato directo)
-        Load_Src_Sel : in std_logic; -- 0=EA_Adder_Res, 1=TMP (Dato 16 bits ensamblado)
-        
-        -- Selección de operandos para el EA Adder
-        EA_A_Sel  : in  std_logic;
-        EA_B_Sel  : in  std_logic
+        Load_Src_Sel : in std_logic -- 0=EA_Adder_Res, 1=TMP (Dato 16 bits ensamblado)
     );
 end entity AddressPath;
 
-architecture Behavioral of AddressPath is
+architecture unique of AddressPath is
 
     -- Registros internos de 16 bits
     signal r_PC  : unsigned_address_vector := (others => '0');
@@ -60,26 +56,19 @@ architecture Behavioral of AddressPath is
 
     -- Señales internas
     signal EA_Adder_Res : unsigned_address_vector; -- Resultado del sumador
-    signal EA_Adder_A_In: unsigned_address_vector; -- Operando A para el sumador
-    signal EA_Adder_B_In: signed_address_vector;   -- Operando B para el sumador (signed para rel8)
     signal Mux_Load_Data : unsigned_address_vector; -- Dato a cargar en registros
 
 begin
 
     -- ========================================================================
-    -- 1. Lógica Combinacional: MUXes y Sumador EA
+    -- 1. Sumador EA (Effective Address Adder)
     -- ========================================================================
-    
-    -- Multiplexor para la entrada A (Base) del sumador
-    EA_Adder_A_In <= r_PC when EA_A_Sel = EA_A_SRC_PC else r_TMP;
-    
-    -- Multiplexor para la entrada B (Índice) del sumador
-    EA_Adder_B_In <= resize(signed(DataIn), 16) when EA_B_Sel = EA_B_SRC_DATA_IN else
-                     resize(unsigned(Index_B), 16);
-
     -- Calcula: Base (TMP) + Índice (B extendido)
     -- Sirve para: [nn+B], Saltos relativos (PC + rel8), etc.
-    EA_Adder_Res <= unsigned(resize(signed(EA_Adder_A_In), 17) + resize(EA_Adder_B_In, 17));
+    -- Nota: Para saltos relativos, TMP tendría el PC actual y DataIn el rel8.
+    --       Para simplificar, aquí asumimos Base = TMP, Index = Index_B.
+    --       (La arquitectura exacta de entradas del sumador puede refinarse según microcódigo)
+    EA_Adder_Res <= r_TMP + resize(unsigned(Index_B), 16);
 
     -- ========================================================================
     -- 2. Multiplexor de Fuente de Carga
@@ -160,12 +149,4 @@ begin
         end case;
     end process;
 
-end architecture Behavioral;
-```
-
-Con `DataPath` y `AddressPath` listos, ya tenemos las dos "piernas" del procesador. Ahora sí que tiene sentido ir a por el `CPU_Top` y la Unidad de Control.
-
-<!--
-[PROMPT_SUGGESTION]Crea el archivo processor/ControlUnit_pkg.vhdl para definir los tipos de señales de control que conectarán la UC con estos dos paths.[/PROMPT_SUGGESTION]
-[PROMPT_SUGGESTION]Ahora crea la estructura general en processor/Processor_Top.vhdl instanciando DataPath y AddressPath.[/PROMPT_SUGGESTION]
--->
+end architecture unique;

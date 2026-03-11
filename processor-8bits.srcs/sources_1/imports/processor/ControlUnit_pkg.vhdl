@@ -40,8 +40,6 @@ package ControlUnit_pkg is
         Load_TMP_L  : std_logic;                    -- Cargar TMP bajo
         Load_TMP_H  : std_logic;                    -- Cargar TMP alto
         Load_Src_Sel: std_logic;                    -- Fuente de carga para PC/SP (0=EA_Adder, 1=TMP)
-        EA_A_Sel    : std_logic;                    -- Selección entrada A del EA Adder (PC o TMP)
-        EA_B_Sel    : std_logic;                    -- Selección entrada B del EA Adder (RegB o DataIn)
 
         -- === MEMORIA / IO ===
         Mem_WE      : std_logic;                    -- Write Enable Memoria
@@ -77,15 +75,11 @@ package ControlUnit_pkg is
         Load_TMP_L  => '0',
         Load_TMP_H  => '0',
         Load_Src_Sel=> LOAD_SRC_ALU_RES,
-        EA_A_Sel    => EA_A_SRC_TMP, -- Por defecto, EA usa TMP
-        EA_B_Sel    => EA_B_SRC_REG_B, -- Por defecto, EA usa RegB
 
         -- Mem/IO
         Mem_WE      => '0', Mem_RE => '0',
         IO_WE       => '0', IO_RE  => '0'
     );
-
-end package ControlUnit_pkg;
 
     component ControlUnit_comp is
         Port (
@@ -93,8 +87,8 @@ end package ControlUnit_pkg;
             reset    : in  std_logic;
             FlagsIn  : in  status_vector;
             InstrIn  : in  data_vector;
-            CtrlBus  : out control_bus_t;
-            EA_A_Sel : out std_logic;
-            EA_B_Sel : out std_logic
+            CtrlBus  : out control_bus_t
         );
     end component ControlUnit_comp;
+
+end package ControlUnit_pkg;

@@ -107,9 +107,7 @@ begin
             Load_EAR     => s_CtrlBus.Load_EAR,
             Load_TMP_L   => s_CtrlBus.Load_TMP_L,
             Load_TMP_H   => s_CtrlBus.Load_TMP_H,
-            Load_Src_Sel => s_CtrlBus.Load_Src_Sel,
-            EA_A_Sel     => s_CtrlBus.EA_A_Sel,
-            EA_B_Sel     => s_CtrlBus.EA_B_Sel
+            Load_Src_Sel => s_CtrlBus.Load_Src_Sel
         );
 
     -- ========================================================================

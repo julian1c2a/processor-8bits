@@ -28,13 +28,6 @@ package AddressPath_pkg is
     constant LOAD_SRC_ALU_RES : std_logic := '0'; -- Resultado calculado (saltos relativos, EA)
     constant LOAD_SRC_DATA_IN : std_logic := '1'; -- Dato directo (LD SP, #nnnn)
 
-    -- Seleccion de fuentes para el EA Adder (para saltos relativos)
-    constant EA_A_SRC_TMP : std_logic := '0'; -- Base = TMP
-    constant EA_A_SRC_PC  : std_logic := '1'; -- Base = PC
-
-    constant EA_B_SRC_REG_B   : std_logic := '0'; -- Índice = Registro B
-    constant EA_B_SRC_DATA_IN : std_logic := '1'; -- Índice = Dato de Memoria (rel8)
-
     -- Componente
     component AddressPath_comp is
         Port (
@@ -50,9 +43,7 @@ package AddressPath_pkg is
             Load_EAR  : in  std_logic;
             Load_TMP_L: in  std_logic;
             Load_TMP_H: in  std_logic;
-            Load_Src_Sel : in std_logic;
-            EA_A_Sel  : in  std_logic;
-            EA_B_Sel  : in  std_logic
+            Load_Src_Sel : in std_logic
         );
     end component AddressPath_comp;
 
