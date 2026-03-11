@@ -18,10 +18,7 @@ Este archivo lista las funcionalidades de la ISA v0.6 que aún no están impleme
 
 ## Prioridad Media (Completar Sets de Instrucciones)
 
-- [ ] **Operaciones Lógicas Faltantes (`XOR`)**
-  - [ ] Opcodes `0x96`, `0xA6`, `0xB6`, `0xBC`.
-  - [ ] Añadir la decodificación y configuración de la ALU para `OP_XOR`.
-
+- [
 - [ ] **Instrucciones de Pila para B (`PUSH B`, `POP B`)**
   - [ ] Opcodes `0x61`, `0x65`.
   - [ ] La lógica de PUSH/POP ya es genérica, solo falta añadir los opcodes al decodificador y configurar `Out_Sel` y `Write_B`.

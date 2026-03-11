@@ -23,7 +23,9 @@ El diseño sigue las mejores prácticas de la industria, incluyendo una arquitec
 La implementación VHDL actual ha completado la infraestructura hardware principal (DataPath, AddressPath, ALU) y una Unidad de Control multiciclo funcional que soporta un subconjunto significativo de la ISA, incluyendo:
 
 * **Carga/Almacenamiento:** Registros (A, B), Inmediato (#n), Absoluto ([nn]), Página Cero ([n]), Indexado ([nn+B]) e Indirecto ([B]).
-* **Operaciones ALU:** Aritméticas (ADD, SUB), Lógicas (AND, OR), Comparación (CMP), Incremento/Decremento (INC, DEC), Negación (NEG) y Desplazamientos/Rotaciones.
+
+- **Operaciones ALU:** Aritméticas (ADD, SUB), Lógicas (AND, OR, XOR), Comparación (CMP), Incremento/Decremento (INC, DEC), Negación (NEG) y Desplazamientos/Rotaciones.
+
 * **Flujo de Control:** Saltos incondicionales (JP) y toda la familia de saltos condicionales relativos (BEQ, BNE, BCS, etc.).
 * **Pila (Stack):** Soporte completo para PUSH/POP de registros (A, B, F) y pares (A:B).
 * **Subrutinas:** Implementación completa de `CALL nn` y `RET`.
