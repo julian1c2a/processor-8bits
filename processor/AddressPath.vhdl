@@ -26,6 +26,7 @@ entity AddressPath is
         
         -- Bus de Direcciones (Salida Principal)
         AddressBus : out address_vector;
+        PC_Out     : out address_vector; -- Salida del PC para guardar en Stack
 
         -- Señales de Control (vienen de UC)
         PC_Op     : in  std_logic_vector(1 downto 0); -- Control PC (Inc, Load...)
@@ -165,6 +166,9 @@ begin
             when others       => AddressBus <= (others => '0');
         end case;
     end process;
+
+    -- Salida auxiliar del PC hacia el DataPath (para PUSH PC/CALL)
+    PC_Out <= std_logic_vector(r_PC);
 
 end architecture Behavioral;
 ```

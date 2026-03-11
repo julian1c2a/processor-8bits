@@ -43,6 +43,7 @@ package AddressPath_pkg is
             DataIn    : in  data_vector;
             Index_B   : in  data_vector;
             AddressBus : out address_vector;
+            PC_Out    : out address_vector; -- Salida del PC actual hacia DataPath
             PC_Op     : in  std_logic_vector(1 downto 0);
             SP_Op     : in  std_logic_vector(1 downto 0);
             ABUS_Sel  : in  std_logic_vector(1 downto 0);

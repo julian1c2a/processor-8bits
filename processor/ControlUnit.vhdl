@@ -52,6 +52,13 @@ architecture unique of ControlUnit is
         S_EXEC_POP_1,     -- POP: Leer byte bajo
         S_EXEC_POP_2,     -- POP: Guardar en Reg y Incrementar SP
         
+        S_EXEC_CALL_1,    -- CALL: Leer destino LOW
+        S_EXEC_CALL_2,    -- CALL: Leer destino HIGH
+        S_EXEC_CALL_3,    -- CALL: Decrementar SP
+        S_EXEC_CALL_4,    -- CALL: Push PC LOW
+        S_EXEC_CALL_5,    -- CALL: Push PC HIGH
+        S_EXEC_CALL_6,    -- CALL: Cargar PC destino
+        
         S_EXEC_BRANCH_REL_1, -- BEQ rel8: Fetch operando y cálculo de dirección
         S_EXEC_BRANCH_REL_2, -- BEQ rel8: Carga de PC si salto se toma
         S_SKIP_BYTE,         -- Estado para saltar un byte (operandos no usados)
@@ -187,6 +194,10 @@ begin
                     -- POP A (0x64)
                     when x"64" =>
                         next_state <= S_EXEC_POP_1;
+
+                    -- CALL nn (0x75)
+                    when x"75" =>
+                        next_state <= S_EXEC_CALL_1;
 
                     -- JP nn (0x70)
                     when x"70" =>
@@ -356,6 +367,53 @@ begin
                 v_ctrl.SP_Op   := SP_OP_INC; -- SP += 2
                 -- (Byte alto M[SP+1] se ignora en POP A de 8 bits)
                 next_state     <= S_FETCH;
+
+            -- -----------------------------------------------------------------
+            -- EJECUCIÓN: CALL nn (0x75)
+            -- -----------------------------------------------------------------
+            when S_EXEC_CALL_1 =>
+                -- 1. Leer Byte Bajo de destino -> TMP_L. Inc PC.
+                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                v_ctrl.Mem_RE     := '1';
+                v_ctrl.Load_TMP_L := '1';
+                v_ctrl.PC_Op      := PC_OP_INC;
+                next_state        <= S_EXEC_CALL_2;
+
+            when S_EXEC_CALL_2 =>
+                -- 2. Leer Byte Alto de destino -> TMP_H. Inc PC.
+                -- Al terminar este ciclo, PC apunta a la instrucción siguiente (Return Addr).
+                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                v_ctrl.Mem_RE     := '1';
+                v_ctrl.Load_TMP_H := '1';
+                v_ctrl.PC_Op      := PC_OP_INC;
+                next_state        <= S_EXEC_CALL_3;
+
+            when S_EXEC_CALL_3 =>
+                -- 3. Reservar Stack (SP -= 2)
+                v_ctrl.SP_Op := SP_OP_DEC;
+                next_state   <= S_EXEC_CALL_4;
+
+            when S_EXEC_CALL_4 =>
+                -- 4. Push PC Low en M[SP]
+                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                v_ctrl.Mem_WE    := '1';
+                v_ctrl.Out_Sel   := OUT_SEL_PCL; -- Salida = PC_L
+                v_ctrl.SP_Offset := '0';
+                next_state       <= S_EXEC_CALL_5;
+
+            when S_EXEC_CALL_5 =>
+                -- 5. Push PC High en M[SP+1]
+                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                v_ctrl.Mem_WE    := '1';
+                v_ctrl.Out_Sel   := OUT_SEL_PCH; -- Salida = PC_H
+                v_ctrl.SP_Offset := '1';
+                next_state       <= S_EXEC_CALL_6;
+
+            when S_EXEC_CALL_6 =>
+                -- 6. Cargar PC con destino (TMP)
+                v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP
+                v_ctrl.PC_Op        := PC_OP_LOAD;
+                next_state          <= S_FETCH;
 
             -- -----------------------------------------------------------------
             -- EJECUCIÓN: Salto Relativo Condicional (BEQ)

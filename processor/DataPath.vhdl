@@ -29,6 +29,7 @@ entity DataPath is
         MemDataIn : in  data_vector; -- Dato leído de memoria/IO
         MemDataOut: out data_vector; -- Dato a escribir en memoria/IO
         IndexB_Out: out data_vector; -- Salida de RegB para el AddressPath
+        PC_In     : in  address_vector; -- Entrada del PC para guardar en Stack
 
         -- Señales de Control (vienen de la UC)
         ALU_Op    : in  opcode_vector; -- Operación ALU
@@ -41,7 +42,7 @@ entity DataPath is
         Flag_Mask : in  status_vector; -- Máscara para actualización parcial de flags (1=update)
         MDR_WE    : in  std_logic; -- Habilitar escritura en MDR (Memory Data Register)
         ALU_Bin_Sel : in std_logic; -- Selección entrada B ALU: 0=Reg, 1=MDR
-        Out_Sel   : in  std_logic_vector(1 downto 0); -- Selección salida: 00=A, 01=B, 10=Zero
+        Out_Sel   : in  std_logic_vector(2 downto 0); -- Selección salida: A, B, Zero, PCL, PCH
         
         -- Salidas de Estado hacia la UC
         FlagsOut  : out status_vector -- Para saltos condicionales
@@ -155,6 +156,8 @@ begin
         RegA            when OUT_SEL_A,
         RegB            when OUT_SEL_B,
         (others => '0') when OUT_SEL_ZERO,
+        PC_In(7 downto 0)   when OUT_SEL_PCL,
+        PC_In(15 downto 8)  when OUT_SEL_PCH,
         (others => '0') when others;
     
     FlagsOut   <= RegF;

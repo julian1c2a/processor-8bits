@@ -11,9 +11,11 @@ package DataPath_pkg is
     constant MEM_MDR_elected : std_logic_vector(1 downto 0) := b"01";
 
     -- Constantes para Out_Sel (Selección de dato a Memoria)
-    constant OUT_SEL_A    : std_logic_vector(1 downto 0) := b"00";
-    constant OUT_SEL_B    : std_logic_vector(1 downto 0) := b"01";
-    constant OUT_SEL_ZERO : std_logic_vector(1 downto 0) := b"10";
+    constant OUT_SEL_A    : std_logic_vector(2 downto 0) := b"000";
+    constant OUT_SEL_B    : std_logic_vector(2 downto 0) := b"001";
+    constant OUT_SEL_ZERO : std_logic_vector(2 downto 0) := b"010";
+    constant OUT_SEL_PCL  : std_logic_vector(2 downto 0) := b"011"; -- PC Low Byte
+    constant OUT_SEL_PCH  : std_logic_vector(2 downto 0) := b"100"; -- PC High Byte
 
     -- Definición del Banco de Registros
     type register_file_t is array(0 to MSB_REGISTERS) of data_vector;
@@ -33,6 +35,7 @@ package DataPath_pkg is
             MemDataIn : in  data_vector;
             MemDataOut: out data_vector;
             IndexB_Out: out data_vector;
+            PC_In     : in  address_vector; -- Entrada del PC actual para guardar en stack
             ALU_Op    : in  opcode_vector;
             Bus_Op    : in  std_logic_vector(1 downto 0);
             Write_A   : in  std_logic;
@@ -42,7 +45,7 @@ package DataPath_pkg is
             Flag_Mask : in  status_vector;
             MDR_WE    : in  std_logic;
             ALU_Bin_Sel : in std_logic;
-            Out_Sel   : in  std_logic_vector(1 downto 0);
+            Out_Sel   : in  std_logic_vector(2 downto 0);
             FlagsOut  : out status_vector
         );
     end component DataPath_comp;
