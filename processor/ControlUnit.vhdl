@@ -85,9 +85,11 @@ begin
     -- =========================================================================
     comb_proc: process(state, r_IR, InstrIn, FlagsIn)
         variable v_ctrl : control_bus_t;
+        variable v_branch_taken : boolean; -- Variable local para evaluar condiciones
     begin
         -- Valores por defecto (NOP seguro) para evitar latches inferidos
         v_ctrl := INIT_CTRL_BUS;
+        v_branch_taken := false;
         next_state <= state; -- Por defecto mantenemos estado (o S_RESET si algo falla)
 
         case state is
@@ -148,6 +150,31 @@ begin
                     -- BEQ rel8 (0x80)
                     when x"80" =>
                         if FlagsIn(idx_fZ) = '1' then next_state <= S_EXEC_BRANCH_REL_1; else next_state <= S_SKIP_BYTE; end if;
+                    -- Saltos Condicionales (0x80 - 0x8B)
+                    when x"80" | x"81" | x"82" | x"83" | x"84" | x"85" | 
+                         x"86" | x"87" | x"88" | x"89" | x"8A" | x"8B" =>
+                        
+                        case r_IR is
+                            when x"80" => if FlagsIn(idx_fZ) = '1' then v_branch_taken := true; end if; -- BEQ (Z=1)
+                            when x"81" => if FlagsIn(idx_fZ) = '0' then v_branch_taken := true; end if; -- BNE (Z=0)
+                            when x"82" => if FlagsIn(idx_fC) = '1' then v_branch_taken := true; end if; -- BCS (C=1)
+                            when x"83" => if FlagsIn(idx_fC) = '0' then v_branch_taken := true; end if; -- BCC (C=0)
+                            when x"84" => if FlagsIn(idx_fV) = '1' then v_branch_taken := true; end if; -- BVS (V=1)
+                            when x"85" => if FlagsIn(idx_fV) = '0' then v_branch_taken := true; end if; -- BVC (V=0)
+                            when x"86" => if FlagsIn(idx_fG) = '1' then v_branch_taken := true; end if; -- BGT (G=1)
+                            when x"87" => if FlagsIn(idx_fG) = '0' then v_branch_taken := true; end if; -- BLE (G=0)
+                            when x"88" => if (FlagsIn(idx_fG) = '1' or FlagsIn(idx_fE) = '1') then v_branch_taken := true; end if; -- BGE
+                            when x"89" => if (FlagsIn(idx_fG) = '0' and FlagsIn(idx_fE) = '0') then v_branch_taken := true; end if; -- BLT
+                            when x"8A" => if FlagsIn(idx_fH) = '1' then v_branch_taken := true; end if; -- BHC (H=1)
+                            when x"8B" => if FlagsIn(idx_fE) = '1' then v_branch_taken := true; end if; -- BEQ2 (E=1)
+                            when others => null;
+                        end case;
+
+                        if v_branch_taken then
+                            next_state <= S_EXEC_BRANCH_REL_1;
+                        else
+                            next_state <= S_SKIP_BYTE;
+                        end if;
 
                     -- JP nn (0x70)
                     when x"70" =>
@@ -299,6 +326,7 @@ begin
 
             when S_SKIP_BYTE =>
                 -- Salto no tomado: simplemente saltamos el operando y vamos a la siguiente.
+                v_ctrl.PC_Op := PC_OP_INC; -- Importante: Saltar el byte de offset (rel8)
                 next_state <= S_FETCH;
 
             -- -----------------------------------------------------------------
