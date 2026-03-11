@@ -59,3 +59,11 @@ El proyecto utiliza un sistema de verificación exhaustivo para la ALU, con un o
 * **Detalles de los Testbenches**
 
 ---
+
+## Licencia
+
+Este proyecto se distribuye bajo la licencia MIT. Ver el archivo `LICENSE` para más detalles.
+
+Copyright (c) 2026 MICROELECTRÓNICA26.UMA.EII
+
+---
