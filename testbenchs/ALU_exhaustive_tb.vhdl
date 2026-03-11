@@ -3,6 +3,7 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 use IEEE.STD_LOGIC_TEXTIO.ALL;
 use STD.TEXTIO.ALL;
+use work.ALU_pkg.ALL;
 
 -- Testbench exhaustivo de la ALU.
 --
@@ -29,30 +30,21 @@ end entity ALU_exhaustive_tb;
 
 architecture bench of ALU_exhaustive_tb is
 
-    component ALU is
-        Port (
-            RegInA    : in  STD_LOGIC_VECTOR(7 downto 0);
-            RegInB    : in  STD_LOGIC_VECTOR(7 downto 0);
-            Oper      : in  STD_LOGIC_VECTOR(4 downto 0);
-            Carry_in  : in  STD_LOGIC := '0';
-            RegOutACC : out STD_LOGIC_VECTOR(7 downto 0);
-            RegStatus : out STD_LOGIC_VECTOR(7 downto 0)
-        );
-    end component ALU;
+    for all : ALU_comp use entity work.ALU(unique);
 
-    signal s_A      : STD_LOGIC_VECTOR(7 downto 0) := (others => '0');
-    signal s_B      : STD_LOGIC_VECTOR(7 downto 0) := (others => '0');
-    signal s_Op     : STD_LOGIC_VECTOR(4 downto 0) := (others => '0');
+    signal s_A      : data_vector := (others => '0');
+    signal s_B      : data_vector := (others => '0');
+    signal s_Op     : opcode_vector := (others => '0');
     signal s_Cin    : STD_LOGIC := '0';
-    signal s_ACC    : STD_LOGIC_VECTOR(7 downto 0);
-    signal s_Status : STD_LOGIC_VECTOR(7 downto 0);
+    signal s_ACC    : data_vector;
+    signal s_Status : status_vector;
 
     -- Tiempo de estabilización combinacional
     constant T_PROP : time := 10 ns;
 
 begin
 
-    dut: ALU port map (
+    dut: ALU_comp port map (
         RegInA    => s_A,
         RegInB    => s_B,
         Oper      => s_Op,
@@ -79,8 +71,8 @@ begin
         variable v_stat_exp: integer;
 
         -- Vectores de comparación
-        variable exp_acc   : STD_LOGIC_VECTOR(7 downto 0);
-        variable exp_stat  : STD_LOGIC_VECTOR(7 downto 0);
+        variable exp_acc   : data_vector;
+        variable exp_stat  : status_vector;
 
         -- Contadores
         variable total     : integer := 0;

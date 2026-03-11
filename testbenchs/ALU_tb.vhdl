@@ -12,24 +12,15 @@ end entity ALU_tb;
 architecture unique of ALU_tb is
 
     -- 1. Declarar el componente que vamos a probar (nuestra ALU)
-    component ALU is
-        Port (
-            RegInA    : in  STD_LOGIC_VECTOR(7 downto 0);
-            RegInB    : in  STD_LOGIC_VECTOR(7 downto 0);
-            Oper      : in  STD_LOGIC_VECTOR(4 downto 0);
-            Carry_in  : in  STD_LOGIC := '0';
-            RegOutACC : out STD_LOGIC_VECTOR(7 downto 0);
-            RegStatus : out STD_LOGIC_VECTOR(7 downto 0)
-        );
-    end component ALU;
+    for all : ALU_comp use entity work.ALU(unique);
 
     -- 2. Señales para conectar a los puertos del componente
-    signal s_RegInA    : STD_LOGIC_VECTOR(7 downto 0) := (others => '0');
-    signal s_RegInB    : STD_LOGIC_VECTOR(7 downto 0) := (others => '0');
-    signal s_Oper      : STD_LOGIC_VECTOR(4 downto 0) := (others => '0');
+    signal s_RegInA    : data_vector := (others => '0');
+    signal s_RegInB    : data_vector := (others => '0');
+    signal s_Oper      : opcode_vector := (others => '0');
     signal s_Carry_in  : STD_LOGIC := '0';
-    signal s_RegOutACC : STD_LOGIC_VECTOR(7 downto 0);
-    signal s_RegStatus : STD_LOGIC_VECTOR(7 downto 0);
+    signal s_RegOutACC : data_vector;
+    signal s_RegStatus : status_vector;
 
     -- Constante para el ciclo de reloj
     constant clk_period : time := 10 ns;
@@ -37,7 +28,7 @@ architecture unique of ALU_tb is
 begin
 
     -- 3. Instanciar el componente a probar (DUT: Device Under Test)
-    uut: ALU Port map (
+    uut: ALU_comp Port map (
         RegInA    => s_RegInA,
         RegInB    => s_RegInB,
         Oper      => s_Oper,
@@ -51,8 +42,8 @@ begin
         -- Procedure para verificar los resultados de un caso de prueba
         procedure check_case(
             constant case_name      : in string;
-            constant expected_acc   : in STD_LOGIC_VECTOR(7 downto 0);
-            constant expected_flags : in STD_LOGIC_VECTOR(7 downto 0)
+            constant expected_acc   : in data_vector;
+            constant expected_flags : in status_vector
         ) is
             variable acc_ok   : boolean;
             variable flags_ok : boolean;

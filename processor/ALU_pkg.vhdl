@@ -47,4 +47,16 @@ package ALU_pkg is
     constant OP_DEB  : opcode_vector := b"11011"; -- Decrement B (result → ACC)
     -- Reservados: 11100, 11101, 11110, 11111
 
+    -- Declaración centralizada del componente
+    component ALU_comp is
+        Port (
+            RegInA    : in  data_vector;
+            RegInB    : in  data_vector;
+            Oper      : in  opcode_vector;
+            Carry_in  : in  STD_LOGIC := '0';
+            RegOutACC : out data_vector;
+            RegStatus : out status_vector
+        );
+    end component ALU_comp;
+
 end package ALU_pkg;
