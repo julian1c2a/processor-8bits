@@ -80,7 +80,7 @@ begin
 
     -- Calcula: Base (TMP) + Índice (B extendido)
     -- Sirve para: [nn+B], Saltos relativos (PC + rel8), etc.
-    EA_Adder_Res <= unsigned(resize(signed(EA_Adder_A_In), 17) + resize(EA_Adder_B_In, 17));
+    EA_Adder_Res <= unsigned( (resize(signed(EA_Adder_A_In), ADDRESS_WIDTH + 1) + resize(EA_Adder_B_In, ADDRESS_WIDTH + 1))(MSB_ADDRESS downto 0) );
 
     -- ========================================================================
     -- 2. Multiplexor de Fuente de Carga
