@@ -58,6 +58,9 @@ architecture unique of ControlUnit is
         
         S_EXEC_POP_F_2,   -- POP F: Guardar en F
         
+        S_EXEC_POP_AB_2,  -- POP A:B: Guardar B y Leer byte alto
+        S_EXEC_POP_AB_3,  -- POP A:B: Guardar A y restaurar SP
+        
         S_EXEC_CALL_1,    -- CALL: Leer destino LOW
         S_EXEC_CALL_2,    -- CALL: Leer destino HIGH
         S_EXEC_CALL_3,    -- CALL: Decrementar SP
@@ -283,12 +286,20 @@ begin
                     when x"62" =>
                         next_state <= S_EXEC_PUSH_1;
 
+                    -- PUSH A:B (0x63)
+                    when x"63" =>
+                        next_state <= S_EXEC_PUSH_1;
+
                     -- POP A (0x64)
                     when x"64" =>
                         next_state <= S_EXEC_POP_1;
 
                     -- POP F (0x66)
                     when x"66" =>
+                        next_state <= S_EXEC_POP_1;
+
+                    -- POP A:B (0x67)
+                    when x"67" =>
                         next_state <= S_EXEC_POP_1;
 
                     -- CALL nn (0x75)
@@ -466,6 +477,8 @@ begin
                 v_ctrl.SP_Offset := '0';       -- Dir = SP
                 if r_IR = x"62" then -- PUSH F
                     v_ctrl.Out_Sel := OUT_SEL_F; -- Dato = RegF
+                elsif r_IR = x"63" then -- PUSH A:B
+                    v_ctrl.Out_Sel := OUT_SEL_B; -- Dato = RegB (Byte Bajo)
                 end if;
                 next_state <= S_EXEC_PUSH_3;
 
@@ -475,6 +488,9 @@ begin
                 v_ctrl.Mem_WE    := '1';
                 v_ctrl.Out_Sel   := OUT_SEL_ZERO; -- Dato = 0x00
                 v_ctrl.SP_Offset := '1';          -- Dir = SP + 1
+                if r_IR = x"63" then -- PUSH A:B
+                    v_ctrl.Out_Sel := OUT_SEL_A; -- Dato = RegA (Byte Alto)
+                end if;
                 next_state       <= S_FETCH;
 
             -- -----------------------------------------------------------------
@@ -486,7 +502,9 @@ begin
                 v_ctrl.Mem_RE    := '1';
                 v_ctrl.MDR_WE    := '1';
                 v_ctrl.SP_Offset := '0';
-                next_state       <= S_EXEC_POP_2;
+                if r_IR = x"67" then next_state <= S_EXEC_POP_AB_2;
+                else next_state <= S_EXEC_POP_2;
+                end if;
 
             when S_EXEC_POP_2 =>
                 -- Paso 2: Escribir MDR en A y restaurar SP (+2)
@@ -504,6 +522,25 @@ begin
                 v_ctrl.Bus_Op  := MEM_MDR_elected;
                 v_ctrl.Load_F_Direct := '1'; -- Carga directa a F
                 v_ctrl.SP_Op   := SP_OP_INC; -- SP += 2
+                next_state     <= S_FETCH;
+
+            when S_EXEC_POP_AB_2 =>
+                -- POP A:B Paso 2: Escribir MDR en B, Leer byte alto M[SP+1]
+                v_ctrl.Bus_Op  := MEM_MDR_elected;
+                v_ctrl.Write_B := '1';
+                v_ctrl.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH)); -- R1 (B)
+                
+                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                v_ctrl.SP_Offset := '1';
+                v_ctrl.Mem_RE    := '1';
+                v_ctrl.MDR_WE    := '1';
+                next_state       <= S_EXEC_POP_AB_3;
+
+            when S_EXEC_POP_AB_3 =>
+                -- POP A:B Paso 3: Escribir MDR en A, SP += 2
+                v_ctrl.Bus_Op  := MEM_MDR_elected;
+                v_ctrl.Write_A := '1';
+                v_ctrl.SP_Op   := SP_OP_INC;
                 next_state     <= S_FETCH;
 
             -- -----------------------------------------------------------------
