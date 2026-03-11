@@ -38,26 +38,42 @@ architecture unique of Processor_Top_tb is
     
     -- Inicialización de la memoria con un PROGRAMA DE PRUEBA
     signal RAM : ram_type := (
-        -- TEST: Direccionamiento Indexado [nn+B]
-        -- 1. Carga B con 0x05
-        -- 2. Carga A desde [0x0200 + B] -> Lee de 0x0205 (Dato 0x55)
-        -- 3. Guarda A en [0x0300 + B]   -> Escribe en 0x0305
-        -- 4. HALT
+        -- TEST: Página Cero [n] e Indirecto [B]
+        -- 1. LD A, [0x10]      ; Carga 0xAA desde dir 0x0010 (Pág Cero)
+        -- 2. ST A, [0x20]      ; Guarda 0xAA en dir 0x0020 (Pág Cero)
+        -- 3. LD B, #0x20       ; B = 0x20
+        -- 4. LD A, [B]         ; Carga desde [0x00:B] = 0x0020 -> A = 0xAA
+        -- 5. INC A             ; A = 0xAB
+        -- 6. LD B, #0x30       ; B = 0x30
+        -- 7. ST A, [B]         ; Guarda 0xAB en [0x0030]
+        -- 8. HALT
         
-        -- 0x0000: LD B, #0x05
-        16#0000# => x"21", 16#0001# => x"05",
+        -- 0x0000: LD A, [0x10]
+        16#0000# => x"12", 16#0001# => x"10",
         
-        -- 0x0002: LD A, [0x0200 + B] (Opcode 0x15)
-        16#0002# => x"15", 16#0003# => x"00", 16#0004# => x"02",
+        -- 0x0002: ST A, [0x20]
+        16#0002# => x"30", 16#0003# => x"20",
         
-        -- 0x0005: ST A, [0x0300 + B] (Opcode 0x33)
-        16#0005# => x"33", 16#0006# => x"00", 16#0007# => x"03",
+        -- 0x0004: LD B, #0x20
+        16#0004# => x"21", 16#0005# => x"20",
         
-        -- 0x0008: HALT
-        16#0008# => x"01",
+        -- 0x0006: LD A, [B]
+        16#0006# => x"14",
         
-        -- Datos iniciales
-        16#0205# => x"55", 
+        -- 0x0007: INC A (0xC2)
+        16#0007# => x"C2",
+        
+        -- 0x0008: LD B, #0x30
+        16#0008# => x"21", 16#0009# => x"30",
+        
+        -- 0x000A: ST A, [B]
+        16#000A# => x"32",
+        
+        -- 0x000B: HALT
+        16#000B# => x"01",
+
+        -- Dato inicial
+        16#0010# => x"AA",
         
         others => x"00" -- Resto a 0 (NOP)
     );
@@ -111,7 +127,7 @@ begin
     -- Proceso de Estímulo
     stim_proc: process
     begin
-        report "=== INICIO SIMULACION PROCESADOR (Test Indexado [nn+B]) ===";
+        report "=== INICIO SIMULACION PROCESADOR (Test Página Cero/Indirecto) ===";
         
         -- Reset del sistema
         reset <= '1';
@@ -123,19 +139,19 @@ begin
         wait for clk_period * 50;
 
         report "--- Verificación ---";
-        -- Al final de la simulación, el PC debe estar en 0x0009, en un bucle HALT.
-        -- (La instrucción HALT está en 0x0008, tras decodificarla PC avanza a 0x0009)
-        assert MemAddress = x"0009"
-            report "FAIL: El PC final no es correcto. Esperado 0x0009, obtenido: 0x" & to_hstring(MemAddress)
+        -- Al final, PC debe estar en 0x000C (HALT en 0x000B + 1)
+        assert MemAddress = x"000C"
+            report "FAIL: El PC final no es correcto. Esperado 0x000C, obtenido: 0x" & to_hstring(MemAddress)
             severity error;
             
-        -- Verificación de la escritura en memoria en dirección indexada (0x0300 + 0x05 = 0x0305)
-        assert RAM(16#0305#) = x"55"
-            report "FAIL: Escritura indexada incorrecta en 0x0305. Esperado 0x55, Leído: 0x" & to_hstring(RAM(16#0305#))
+        -- Verificación de escritura en 0x0020 (ST A, [0x20]) -> 0xAA
+        -- Verificación de escritura en 0x0030 (ST A, [B])    -> 0xAB
+        assert RAM(16#0030#) = x"AB"
+            report "FAIL: Escritura indirecta incorrecta en 0x0030. Esperado 0xAB, Leído: 0x" & to_hstring(RAM(16#0030#))
             severity error;
 
-        if (MemAddress = x"0009") and (RAM(16#0305#) = x"55") then
-            report "PASS: Direccionamiento Indexado verificado exitosamente.";
+        if (MemAddress = x"000C") and (RAM(16#0030#) = x"AB") then
+            report "PASS: Direccionamiento PZ e Indirecto verificados.";
         end if;
 
         report "=== FIN DE SIMULACION ===";
