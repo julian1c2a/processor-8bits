@@ -45,6 +45,7 @@ entity AddressPath is
         
         -- Selección de operandos para el EA Adder
         EA_A_Sel  : in  std_logic;
+        Clear_TMP : in  std_logic;
         EA_B_Sel  : in  std_logic_vector(1 downto 0)
     );
 end entity AddressPath;
@@ -107,6 +108,10 @@ begin
             r_TMP <= (others => '0');
         elsif rising_edge(clk) then
             
+            if Clear_TMP = '1' then
+                r_TMP <= (others => '0');
+            end if;
+
             -- --- Gestión de TMP (Ensamblador de 16 bits) ---
             if Load_TMP_L = '1' then
                 r_TMP(7 downto 0) <= unsigned(DataIn);

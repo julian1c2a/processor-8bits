@@ -41,6 +41,7 @@ package ControlUnit_pkg is
         Load_TMP_H  : std_logic;                    -- Cargar TMP alto
         Load_Src_Sel: std_logic;                    -- Fuente de carga para PC/SP (0=EA_Adder, 1=TMP)
         SP_Offset   : std_logic;                    -- Offset para dirección de Stack (0=+0, 1=+1)
+        Clear_TMP   : std_logic;                    -- Poner a cero el registro TMP del AddressPath
         EA_A_Sel    : std_logic;                    -- Selección entrada A del EA Adder (PC o TMP)
         EA_B_Sel    : std_logic_vector(1 downto 0); -- Selección entrada B del EA Adder (RegB, DataIn, Zero)
 
@@ -78,6 +79,7 @@ package ControlUnit_pkg is
         Load_TMP_L  => '0',
         Load_TMP_H  => '0',
         Load_Src_Sel=> LOAD_SRC_ALU_RES,
+        Clear_TMP   => '0',
         SP_Offset   => '0',
         EA_A_Sel    => EA_A_SRC_TMP, -- Por defecto, EA usa TMP
         EA_B_Sel    => EA_B_SRC_REG_B, -- Por defecto, EA usa RegB

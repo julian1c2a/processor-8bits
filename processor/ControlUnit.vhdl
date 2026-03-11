@@ -63,10 +63,14 @@ architecture unique of ControlUnit is
         S_EXEC_RET_2,     -- RET: Leer PC HIGH desde Stack
         S_EXEC_RET_3,     -- RET: Cargar PC y restaurar SP
 
-        S_EXEC_ABS_FETCH_HI, -- LD/ST [nn]: Leer byte alto de dirección
+        S_EXEC_ADDR_FETCH_HI, -- LD/ST [nn] o [nn+B]: Leer byte alto de la dirección base
+        S_EXEC_PZ_FETCH,      -- LD/ST [n]: Cargar dirección de página cero en TMP
+        S_EXEC_INDB_SETUP,    -- LD/ST [B]: Preparar TMP para cálculo de dirección
         S_EXEC_LD_ABS_READ,  -- LD A, [nn]: Leer dato de memoria
-        S_EXEC_LD_ABS_WB,    -- LD A, [nn]: Escribir dato en A
+        S_EXEC_LD_IDX_READ,  -- LD A, [nn+B]: Calcular EA y leer dato
+        S_EXEC_LD_WB,        -- LD A, [...]: Escribir dato en A (Write-Back)
         S_EXEC_ST_ABS_WRITE, -- ST A, [nn]: Escribir dato en memoria
+        S_EXEC_ST_IDX_WRITE, -- ST A, [nn+B]: Calcular EA y escribir dato
         
         S_EXEC_BRANCH_REL_1, -- BEQ rel8: Fetch operando y cálculo de dirección
         S_EXEC_BRANCH_REL_2, -- BEQ rel8: Carga de PC si salto se toma
@@ -155,7 +159,12 @@ begin
                     -- LD A, [nn] (0x13)
                     when x"13" =>
                         v_ctrl.Load_TMP_L := '1';
-                        next_state <= S_EXEC_ABS_FETCH_HI;
+                        next_state <= S_EXEC_ADDR_FETCH_HI;
+
+                    -- LD A, [nn+B] (0x15)
+                    when x"15" =>
+                        v_ctrl.Load_TMP_L := '1';
+                        next_state <= S_EXEC_ADDR_FETCH_HI;
 
                     -- LD B, A (0x20) - NUEVO
                     when x"20" =>
@@ -165,10 +174,25 @@ begin
                     when x"21" =>
                         next_state <= S_EXEC_LDI_B_1;
 
+                    -- LD B, [n] (0x22), [nn] (0x23), [B] (0x24), [nn+B] (0x25)
+                    when x"22" | x"23" | x"24" | x"25" =>
+                        v_ctrl.Load_TMP_L := '1'; -- Carga el primer operando (n o nn_low)
+                        next_state <= S_EXEC_ADDR_FETCH_HI;
+
                     -- ST A, [nn] (0x31)
                     when x"31" =>
                         v_ctrl.Load_TMP_L := '1';
-                        next_state <= S_EXEC_ABS_FETCH_HI;
+                        next_state <= S_EXEC_ADDR_FETCH_HI;
+
+                    -- ST A, [nn+B] (0x33)
+                    when x"33" =>
+                        v_ctrl.Load_TMP_L := '1';
+                        next_state <= S_EXEC_ADDR_FETCH_HI;
+
+                    -- ST B, [n] (0x40), [nn] (0x41), [nn+B] (0x42)
+                    when x"40" | x"41" | x"42" =>
+                        v_ctrl.Load_TMP_L := '1';
+                        next_state <= S_EXEC_ADDR_FETCH_HI;
 
                     -- ALU Register Ops (A op B) -> A
                     -- ADD(0x90), SUB(0x92), AND(0x94), OR(0x95), CMP(0x97)
@@ -469,20 +493,26 @@ begin
 
             -- -----------------------------------------------------------------
             -- EJECUCIÓN: LD A, [nn] y ST A, [nn]
+            -- y modos indexados [nn+B]
             -- -----------------------------------------------------------------
-            when S_EXEC_ABS_FETCH_HI =>
+            when S_EXEC_ADDR_FETCH_HI =>
                 -- PC apunta al byte alto de la dirección. Lo leemos y lo cargamos en TMP_H.
                 -- Al final de este ciclo, TMP contendrá la dirección completa [nn].
                 v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
                 v_ctrl.Mem_RE     := '1';
                 v_ctrl.Load_TMP_H := '1';
                 v_ctrl.PC_Op      := PC_OP_INC; -- PC apunta a la siguiente instrucción
-                
-                -- Bifurcación: ¿es un LD o un ST?
-                if r_IR = x"13" then -- LD A, [nn]
-                    next_state <= S_EXEC_LD_ABS_READ;
-                else -- ST A, [nn]
-                    next_state <= S_EXEC_ST_ABS_WRITE;
+
+                -- Bifurcación según la instrucción
+                -- Los modos indexados y absolutos comparten esta lógica de fetch de dirección
+                case r_IR is
+                    when x"13" | x"23" => next_state <= S_EXEC_LD_ABS_READ;  -- LD A/B, [nn]
+                    when x"15" | x"25" => next_state <= S_EXEC_LD_IDX_READ;  -- LD A/B, [nn+B]
+                    when x"31" | x"41" => next_state <= S_EXEC_ST_ABS_WRITE; -- ST A/B, [nn]
+                    when x"33" | x"42" => next_state <= S_EXEC_ST_IDX_WRITE; -- ST A/B, [nn+B]
+                    when x"22" | x"40" => next_state <= S_EXEC_PZ_FETCH;     -- LD/ST A/B, [n]
+                    when x"24"         => next_state <= S_EXEC_INDB_SETUP;   -- LD B, [B]
+                    when others        => next_state <= S_FETCH; -- Error, volver a fetch
                 end if;
 
             when S_EXEC_LD_ABS_READ =>
@@ -492,12 +522,26 @@ begin
                 v_ctrl.ABUS_Sel  := ABUS_SRC_EA_RES;
                 v_ctrl.Mem_RE    := '1';
                 v_ctrl.MDR_WE    := '1'; -- Capturar el dato en MDR
-                next_state       <= S_EXEC_LD_ABS_WB;
+                next_state       <= S_EXEC_LD_WB;
 
-            when S_EXEC_LD_ABS_WB =>
+            when S_EXEC_LD_IDX_READ =>
+                -- TMP tiene la base, B el índice. Calculamos EA y leemos.
+                v_ctrl.EA_A_Sel  := EA_A_SRC_TMP;
+                v_ctrl.EA_B_Sel  := EA_B_SRC_REG_B;
+                v_ctrl.ABUS_Sel  := ABUS_SRC_EA_RES;
+                v_ctrl.Mem_RE    := '1';
+                v_ctrl.MDR_WE    := '1';
+                next_state       <= S_EXEC_LD_WB;
+
+            when S_EXEC_LD_WB =>
                 -- El dato está en MDR. Lo escribimos en A.
-                v_ctrl.Bus_Op  := MEM_MDR_elected;
-                v_ctrl.Write_A := '1';
+                v_ctrl.Bus_Op := MEM_MDR_elected;
+                if r_IR = x"13" or r_IR = x"15" then -- LD A, ...
+                    v_ctrl.Write_A := '1';
+                else -- LD B, ...
+                    v_ctrl.Write_B := '1';
+                    v_ctrl.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
+                end if;
                 v_ctrl.Write_F := '1'; v_ctrl.Flag_Mask(idx_fZ) := '1'; -- LD afecta a Z
                 next_state     <= S_FETCH;
 
@@ -506,9 +550,43 @@ begin
                 v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
                 v_ctrl.EA_B_Sel := EA_B_SRC_ZERO;
                 v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
-                v_ctrl.Out_Sel  := OUT_SEL_A;
+                if r_IR = x"31" or r_IR = x"40" then -- ST A/B, [n] o [nn]
+                    v_ctrl.Out_Sel := OUT_SEL_A when r_IR = x"31" else OUT_SEL_B;
+                else
+                    v_ctrl.Out_Sel := OUT_SEL_A;
+                end if;
                 v_ctrl.Mem_WE   := '1';
                 next_state      <= S_FETCH;
+
+            when S_EXEC_ST_IDX_WRITE =>
+                -- TMP tiene la base, B el índice. Calculamos EA y escribimos A.
+                v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
+                v_ctrl.EA_B_Sel := EA_B_SRC_REG_B;
+                v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
+                if r_IR = x"33" then v_ctrl.Out_Sel := OUT_SEL_A; else v_ctrl.Out_Sel := OUT_SEL_B; end if;
+                v_ctrl.Mem_WE   := '1';
+                next_state      <= S_FETCH;
+
+            when S_EXEC_PZ_FETCH =>
+                -- El operando 'n' está en InstrIn. Lo cargamos en TMP_L y limpiamos TMP_H.
+                v_ctrl.Clear_TMP  := '1';
+                v_ctrl.Load_TMP_L := '1';
+                v_ctrl.PC_Op      := PC_OP_INC;
+                if r_IR = x"22" then -- LD B, [n]
+                    next_state <= S_EXEC_LD_ABS_READ;
+                else -- ST B, [n]
+                    next_state <= S_EXEC_ST_ABS_WRITE;
+                end if;
+
+            when S_EXEC_INDB_SETUP =>
+                -- Preparamos para calcular [B] poniendo TMP a cero.
+                v_ctrl.Clear_TMP := '1';
+                -- En el siguiente ciclo, TMP será 0, y podemos usar el sumador
+                -- para calcular 0 + B.
+                -- La instrucción LD B, [B] es de 1 byte, PC ya apunta a la siguiente.
+                -- Reutilizamos el estado de lectura indexada.
+                next_state <= S_EXEC_LD_IDX_READ;
+
 
             -- -----------------------------------------------------------------
             -- EJECUCIÓN: Salto Relativo Condicional (BEQ)
