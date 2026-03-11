@@ -410,6 +410,11 @@ begin
                     when x"70" =>
                         next_state <= S_EXEC_JP_1;
 
+                    -- JR rel8 (0x71)
+                    when x"71" =>
+                        v_branch_taken := true; -- Siempre salta
+                        next_state <= S_EXEC_BRANCH_REL_1;
+
                     -- JP ([nn]) (0x73)
                     when x"73" =>
                         v_ctrl.Load_TMP_L := '1';
