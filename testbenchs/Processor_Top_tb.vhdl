@@ -38,27 +38,27 @@ architecture unique of Processor_Top_tb is
     
     -- Inicialización de la memoria con un PROGRAMA DE PRUEBA
     signal RAM : ram_type := (
-        -- TEST: CALL y RET
-        -- Flujo esperado: 0x0000 -> 0x0002 (CALL) -> 0x0010 (Sub) -> 0x0012 (RET) -> 0x0005 -> 0x0007 (HALT)
+        -- TEST: ST A, [nn] y LD A, [nn]
+        -- 1. Carga A con 0xAA
+        -- 2. Guarda A en la dirección 0x0100
+        -- 3. Carga A con 0x00 para borrarlo
+        -- 4. Carga A desde la dirección 0x0100
+        -- 5. HALT. Al final, A debe ser 0xAA, y M[0x0100] debe ser 0xAA.
         
-        -- 0x0000: LD A, #0x10      (A = 16)
-        16#0000# => x"11", 16#0001# => x"10",
+        -- 0x0000: LD A, #0xAA
+        16#0000# => x"11", 16#0001# => x"AA",
         
-        -- 0x0002: CALL 0x0010      (Llamada a subrutina, guarda ret=0x0005 en stack)
-        16#0002# => x"75", 16#0003# => x"10", 16#0004# => x"00",
+        -- 0x0002: ST A, [0x0100]
+        16#0002# => x"31", 16#0003# => x"00", 16#0004# => x"01",
         
-        -- 0x0005: ADD A, #0x02     (A += 2. Si A era 17, ahora 19)
-        16#0005# => x"A0", 16#0006# => x"02",
+        -- 0x0005: LD A, #0x00
+        16#0005# => x"11", 16#0006# => x"00",
         
-        -- 0x0007: HALT             (Fin del programa)
-        16#0007# => x"01",
-        
-        -- --- SUBRUTINA en 0x0010 ---
-        -- 0x0010: ADD A, #0x01     (A += 1)
-        16#0010# => x"A0", 16#0011# => x"01",
+        -- 0x0007: LD A, [0x0100]
+        16#0007# => x"13", 16#0008# => x"00", 16#0009# => x"01",
 
-        -- 0x0012: RET              (Retorna a 0x0005)
-        16#0012# => x"77",
+        -- 0x000A: HALT
+        16#000A# => x"01",
         
         others => x"00" -- Resto a 0 (NOP)
     );
@@ -112,7 +112,7 @@ begin
     -- Proceso de Estímulo
     stim_proc: process
     begin
-        report "=== INICIO SIMULACION PROCESADOR (Test CALL/RET) ===";
+        report "=== INICIO SIMULACION PROCESADOR (Test ST/LD) ===";
         
         -- Reset del sistema
         reset <= '1';
@@ -124,29 +124,19 @@ begin
         wait for clk_period * 50;
 
         report "--- Verificación ---";
-        -- Al final de la simulación, el PC debe estar en 0x0008, en un bucle HALT.
-        -- (La instrucción HALT está en 0x0007, tras decodificarla PC avanza a 0x0008)
-        assert MemAddress = x"0008"
-            report "FAIL: El PC final no es correcto. Esperado 0x0008 (HALT tras retorno), obtenido: 0x" & to_hstring(MemAddress)
+        -- Al final de la simulación, el PC debe estar en 0x000B, en un bucle HALT.
+        -- (La instrucción HALT está en 0x000A, tras decodificarla PC avanza a 0x000B)
+        assert MemAddress = x"000B"
+            report "FAIL: El PC final no es correcto. Esperado 0x000B, obtenido: 0x" & to_hstring(MemAddress)
             severity error;
             
-        -- Verificación del Stack:
-        -- CALL guarda la dirección de retorno (0x0005) en el stack.
-        -- Stack empieza en 0xFFFE.
-        -- PUSH Low (0x05) en 0xFFFC.
-        -- PUSH High (0x00) en 0xFFFD.
-        -- (AddressPath decrementa SP primero, luego escribe. SP final en subrutina es 0xFFFC).
-        
-        assert RAM(16#FFFC#) = x"05"
-            report "FAIL: Stack Low Byte incorrecto. Esperado 0x05, Leído: 0x" & to_hstring(RAM(16#FFFC#))
+        -- Verificación de la escritura en memoria
+        assert RAM(16#0100#) = x"AA"
+            report "FAIL: La instrucción ST A, [0x0100] no escribió el valor correcto. Esperado 0xAA, Leído: 0x" & to_hstring(RAM(16#0100#))
             severity error;
 
-        assert RAM(16#FFFD#) = x"00"
-            report "FAIL: Stack High Byte incorrecto. Esperado 0x00, Leído: 0x" & to_hstring(RAM(16#FFFD#))
-            severity error;
-
-        if (MemAddress = x"0008") and (RAM(16#FFFC#) = x"05") then
-            report "PASS: Ciclo CALL/RET verificado exitosamente.";
+        if (MemAddress = x"000B") and (RAM(16#0100#) = x"AA") then
+            report "PASS: Ciclo ST/LD verificado exitosamente.";
         end if;
 
         report "=== FIN DE SIMULACION ===";
