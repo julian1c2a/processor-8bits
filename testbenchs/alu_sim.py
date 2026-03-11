@@ -47,25 +47,25 @@ OPERATIONS: dict[str, tuple[int, bool]] = {
     "INC":  (0b01001,  False),  #  9
     "DEC":  (0b01010,  False),  # 10
     "AND":  (0b01011,  False),  # 11
-    "OR":   (0b01100,  False),  # 12
+    "IOR":  (0b01100,  False),  # 12
     "XOR":  (0b01101,  False),  # 13
     "NOT":  (0b01110,  False),  # 14
     "ASL":  (0b01111,  False),  # 15
-    "PA":   (0b10001,  False),  # 17
-    "PB":   (0b10010,  False),  # 18
-    "CL":   (0b10011,  False),  # 19
+    "PSA":  (0b10001,  False),  # 17
+    "PSB":  (0b10010,  False),  # 18
+    "CLR":  (0b10011,  False),  # 19
     "SET":  (0b10100,  False),  # 20
     "MUL":  (0b10101,  False),  # 21
     "MUH":  (0b10110,  False),  # 22
     "CMP":  (0b10111,  False),  # 23
     "ASR":  (0b11000,  False),  # 24
-    "SWAP": (0b11001,  False),  # 25
+    "SWP":  (0b11001,  False),  # 25
 }
 
 # Operaciones que solo usan A (ignoran B)
-UNARY_OPS = {"INC", "DEC", "NOT", "ASL", "ASR", "LSL", "LSR", "PA", "CL", "SET", "NOP"}
+UNARY_OPS = {"INC", "DEC", "NOT", "ASL", "ASR", "LSL", "LSR", "PSA", "CLR", "SET", "NOP"}
 # Operaciones que solo usan B (ignoran A)
-PASS_B_OPS = {"PB"}
+PASS_B_OPS = {"PSB"}
 
 # ---------------------------------------------------------------------------
 # Rutas

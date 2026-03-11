@@ -176,7 +176,7 @@ def ref_AND(a, b, cin):
     Z = common_Z(acc)
     return acc, pack_status(Z=Z, G=G, E=E)
 
-def ref_OR(a, b, cin):
+def ref_IOR(a, b, cin):
     acc = a | b
     G, E = common_GE(a, b)
     Z = common_Z(acc)
@@ -203,17 +203,17 @@ def ref_ASL(a, b, cin):
     Z = common_Z(acc)
     return acc, pack_status(V=V, Z=Z, G=G, E=E, L=L)
 
-def ref_PA(a, b, cin):
+def ref_PSA(a, b, cin):
     G, E = common_GE(a, b)
     Z = common_Z(a)
     return a, pack_status(Z=Z, G=G, E=E)
 
-def ref_PB(a, b, cin):
+def ref_PSB(a, b, cin):
     G, E = common_GE(a, b)
     Z = common_Z(b)
     return b, pack_status(Z=Z, G=G, E=E)
 
-def ref_CL(a, b, cin):
+def ref_CLR(a, b, cin):
     G, E = common_GE(a, b)
     Z = 1  # siempre cero
     return 0, pack_status(Z=Z, G=G, E=E)
@@ -261,7 +261,7 @@ def ref_ASR(a, b, cin):
     Z = common_Z(acc)
     return acc, pack_status(Z=Z, G=G, E=E, R=R)
 
-def ref_SWAP(a, b, cin):
+def ref_SWP(a, b, cin):
     acc = u8(((a & 0x0F) << 4) | ((a & 0xF0) >> 4))
     G, E = common_GE(a, b)
     Z = common_Z(acc)
@@ -284,8 +284,8 @@ def ref_NEG(a, b, cin):
     Z = common_Z(acc)
     return acc, pack_status(C=C, H=H, V=V, Z=Z, G=G, E=E)
 
-def ref_INCB(a, b, cin):
-    # INCB: ACC ← B+1  (misma aritmética que INC pero sobre B)
+def ref_INB(a, b, cin):
+    # INB: ACC ← B+1  (misma aritmética que INC pero sobre B)
     nh = (b & 0xF) + 1
     H = 1 if nh > 0xF else 0
     full9 = sign8(b) + 1
@@ -296,8 +296,8 @@ def ref_INCB(a, b, cin):
     Z = common_Z(acc)
     return acc, pack_status(C=C, H=H, V=V, Z=Z, G=G, E=E)
 
-def ref_DECB(a, b, cin):
-    # DECB: ACC ← B-1  (misma aritmética que DEC pero sobre B)
+def ref_DEB(a, b, cin):
+    # DEB: ACC ← B-1  (misma aritmética que DEC pero sobre B)
     nh = (b & 0xF) - 1
     H = 1 if nh >= 0 else 0
     full9 = sign8(b) - 1
@@ -326,22 +326,22 @@ OPERATIONS = {
     "INC":  (0b01001, ref_INC,  False),
     "DEC":  (0b01010, ref_DEC,  False),
     "AND":  (0b01011, ref_AND,  False),
-    "OR":   (0b01100, ref_OR,   False),
+    "IOR":  (0b01100, ref_IOR,  False),
     "XOR":  (0b01101, ref_XOR,  False),
     "NOT":  (0b01110, ref_NOT,  False),
     "ASL":  (0b01111, ref_ASL,  False),
-    "PA":   (0b10001, ref_PA,   False),
-    "PB":   (0b10010, ref_PB,   False),
-    "CL":   (0b10011, ref_CL,   False),
+    "PSA":  (0b10001, ref_PSA,  False),
+    "PSB":  (0b10010, ref_PSB,  False),
+    "CLR":  (0b10011, ref_CLR,  False),
     "SET":  (0b10100, ref_SET,  False),
     "MUL":  (0b10101, ref_MUL,  False),
     "MUH":  (0b10110, ref_MUH,  False),
     "CMP":  (0b10111, ref_CMP,  False),
     "ASR":  (0b11000, ref_ASR,  False),
-    "SWAP": (0b11001, ref_SWAP, False),
+    "SWP":  (0b11001, ref_SWP,  False),
     "NEG":  (0b10000, ref_NEG,  False),
-    "INCB": (0b11010, ref_INCB, False),
-    "DECB": (0b11011, ref_DECB, False),
+    "INB":  (0b11010, ref_INB,  False),
+    "DEB":  (0b11011, ref_DEB,  False),
 }
 
 # ---------------------------------------------------------------------------

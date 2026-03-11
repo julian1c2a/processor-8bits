@@ -1,15 +1,16 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use work.ALU_pkg.ALL;
 
 entity ALU is
     Port (
-        RegInA    : in  STD_LOGIC_VECTOR(7 downto 0);
-        RegInB    : in  STD_LOGIC_VECTOR(7 downto 0);
-        Oper      : in  STD_LOGIC_VECTOR(4 downto 0);
+        RegInA    : in  data_vector;
+        RegInB    : in  data_vector;
+        Oper      : in  opcode_vector;
         Carry_in  : in  STD_LOGIC := '0'; -- Entrada de carry para ADC y SBB
-        RegOutACC : out STD_LOGIC_VECTOR(7 downto 0);
-        RegStatus : out STD_LOGIC_VECTOR(7 downto 0)
+        RegOutACC : out data_vector;
+        RegStatus : out status_vector
     );
 end entity ALU;
 
@@ -38,7 +39,7 @@ begin
         variable mul_res       : unsigned(15 downto 0);
         variable cmp_res       : signed(8 downto 0);
         variable is_cmp_op     : boolean;
-        variable v_RegStatus   : STD_LOGIC_VECTOR(7 downto 0);
+        variable v_RegStatus   : status_vector;
 
     begin
         -- 1. Inicialización por defecto de las salidas en cada ejecución
@@ -53,12 +54,12 @@ begin
 
         -- 3. Lógica principal de la ALU basada en el código de operación
         case Oper is
-            when b"00000" => -- NOP (No Operation)
+            when OP_NOP => -- NOP (No Operation)
                 -- The ACC will output 0x00 by default. A true NOP would be handled
                 -- by the CPU control unit by not clocking the result.
                 null;
 
-            when b"00001" => -- ADD
+            when OP_ADD => -- ADD
                 -- Half-Carry (H): Suma de 4 bits, el acarreo es el bit 4 del resultado de 5 bits.
                 nibble_res := nibbleA_ext + nibbleB_ext;
                 v_RegStatus(6) := nibble_res(4); -- fH
@@ -72,7 +73,7 @@ begin
                     v_RegStatus(5) := '1'; -- fV
                 end if;
 
-            when b"00010" => -- ADC (ADD with Carry)
+            when OP_ADC => -- ADC (ADD with Carry)
                 nibble_res := nibbleA_ext + nibbleB_ext + unsigned'('0' & Carry_in);
                 v_RegStatus(6) := nibble_res(4); -- fH
 
@@ -83,7 +84,7 @@ begin
                     v_RegStatus(5) := '1'; -- fV
                 end if;
 
-            when b"00011" => -- SUB
+            when OP_SUB => -- SUB
                 -- Half-Borrow (H): Es un préstamo, que es lo contrario a un acarreo en la resta.
                 nibble_res := nibbleA_ext - nibbleB_ext;
                 v_RegStatus(6) := not nibble_res(4); -- fH (Borrow)
@@ -97,7 +98,7 @@ begin
                     v_RegStatus(5) := '1'; -- fV
                 end if;
 
-            when b"00100" => -- SBB (SUBtract with Borrow)
+            when OP_SBB => -- SBB (SUBtract with Borrow)
                 nibble_res := nibbleA_ext - nibbleB_ext - unsigned'('0' & Carry_in);
                 v_RegStatus(6) := not nibble_res(4); -- fH (Borrow)
 
@@ -108,21 +109,21 @@ begin
                     v_RegStatus(5) := '1'; -- fV
                 end if;
 
-            when b"00101" => -- LSL (Logical Shift Left)
+            when OP_LSL => -- LSL (Logical Shift Left)
                 acc_ext(7 downto 0) := signed(RegInA(6 downto 0) & '0');
                 v_RegStatus(0) := RegInA(7); -- fL
 
-            when b"00110" => -- LSR (Logical Shift Right)
+            when OP_LSR => -- LSR (Logical Shift Right)
                 acc_ext(7 downto 0) := signed('0' & RegInA(7 downto 1));
                 v_RegStatus(1) := RegInA(0); -- fR
 
-            when b"00111" => -- ROL (Rotate Left)
+            when OP_ROL => -- ROL (Rotate Left)
                 acc_ext(7 downto 0) := signed(RegInA(6 downto 0) & RegInA(7));
 
-            when b"01000" => -- ROR (Rotate Right)
+            when OP_ROR => -- ROR (Rotate Right)
                 acc_ext(7 downto 0) := signed(RegInA(0) & RegInA(7 downto 1));
 
-            when b"01001" => -- INC (Increment)
+            when OP_INC => -- INC (Increment)
                 -- Half-Carry
                 nibble_res := nibbleA_ext + 1;
                 v_RegStatus(6) := nibble_res(4); -- fH
@@ -136,7 +137,7 @@ begin
                     v_RegStatus(5) := '1'; -- fV
                 end if;
 
-            when b"01010" => -- DEC (Decrement)
+            when OP_DEC => -- DEC (Decrement)
                 -- Half-Borrow
                 nibble_res := nibbleA_ext - 1;
                 v_RegStatus(6) := not nibble_res(4); -- fH
@@ -150,19 +151,19 @@ begin
                     v_RegStatus(5) := '1'; -- fV
                 end if;
 
-            when b"01011" => -- AND
+            when OP_AND => -- AND
                 acc_ext(7 downto 0) := signed(RegInA and RegInB);
 
-            when b"01100" => -- OR
+            when OP_IOR => -- OR
                 acc_ext(7 downto 0) := signed(RegInA or RegInB);
 
-            when b"01101" => -- XOR
+            when OP_XOR => -- XOR
                 acc_ext(7 downto 0) := signed(RegInA xor RegInB);
 
-            when b"01110" => -- NOT
+            when OP_NOT => -- NOT
                 acc_ext(7 downto 0) := signed(not RegInA);
 
-            when b"01111" => -- ASL (Arithmetic Shift Left)
+            when OP_ASL => -- ASL (Arithmetic Shift Left)
                 acc_ext(7 downto 0) := signed(RegInA(6 downto 0) & '0');
                 v_RegStatus(0) := RegInA(7); -- fL: bit desplazado fuera
                 -- Overflow (V): el bit de signo cambia (x2 signed desborda)
@@ -170,7 +171,7 @@ begin
                     v_RegStatus(5) := '1'; -- fV
                 end if;
 
-            when b"10000" => -- NEG (Two's Complement Negate: 0 - A)
+            when OP_NEG => -- NEG (Two's Complement Negate: 0 - A)
                 -- Half-borrow del nibble bajo: 0 - nibbleA
                 nibble_res := unsigned'("00000") - nibbleA_ext;
                 v_RegStatus(6) := not nibble_res(4); -- fH (borrow convention igual que SUB)
@@ -184,33 +185,33 @@ begin
                     v_RegStatus(5) := '1'; -- fV
                 end if;
 
-            when b"10001" => -- PA (Pass A)
+            when OP_PSA => -- PA (Pass A)
                 acc_ext(7 downto 0) := signed(RegInA);
 
-            when b"10010" => -- PB (Pass B)
+            when OP_PSB => -- PB (Pass B)
                 acc_ext(7 downto 0) := signed(RegInB);
 
-            when b"10011" => -- CL (Clear ACC)
+            when OP_CLR => -- CL (Clear ACC)
                 acc_ext(7 downto 0) := (others => '0');
 
-            when b"10100" => -- SET (Set ACC)
+            when OP_SET => -- SET (Set ACC)
                 acc_ext(7 downto 0) := (others => '1');
 
-            when b"10101" => -- MUL (Multiply Low)
+            when OP_MUL => -- MUL (Multiply Low)
                 mul_res := unsigned(RegInA) * unsigned(RegInB);
                 acc_ext(7 downto 0) := signed(mul_res(7 downto 0));
                 if mul_res(15 downto 8) /= x"00" then
                     v_RegStatus(7) := '1'; -- fC
                 end if;
 
-            when b"10110" => -- MUH (Multiply High)
+            when OP_MUH => -- MUH (Multiply High)
                 mul_res := unsigned(RegInA) * unsigned(RegInB);
                 acc_ext(7 downto 0) := signed(mul_res(15 downto 8));
                 if mul_res(15 downto 8) /= x"00" then
                     v_RegStatus(7) := '1'; -- fC
                 end if;
 
-            when b"10111" => -- CMP (Compare)
+            when OP_CMP => -- CMP (Compare)
                 is_cmp_op := true; -- Prevent common Z flag logic from running
 
                 -- Half-Borrow (H)
@@ -231,16 +232,16 @@ begin
                     v_RegStatus(4) := '1'; -- fZ (Zero)
                 end if;
                 
-                -- ACC is not modified, will output the default 0x00.
+                acc_ext(7 downto 0) := signed(RegInA); -- ACC no cambia, mantiene el valor de A
 
-            when b"11000" => -- ASR (Arithmetic Shift Right)
+            when OP_ASR => -- ASR (Arithmetic Shift Right)
                 acc_ext(7 downto 0) := signed(RegInA(7) & RegInA(7 downto 1));
                 v_RegStatus(1) := RegInA(0); -- fR, store shifted-out bit
 
-            when b"11001" => -- SWAP (Swap Nibbles)
+            when OP_SWP => -- SWAP (Swap Nibbles)
                 acc_ext(7 downto 0) := signed(RegInA(3 downto 0) & RegInA(7 downto 4));
 
-            when b"11010" => -- INCB (Increment B → ACC)
+            when OP_INB => -- INCB (Increment B → ACC)
                 -- El resultado de B+1 sale por ACC; la UC lo enruta hacia el registro B.
                 nibble_res := nibbleB_ext + 1;
                 v_RegStatus(6) := nibble_res(4); -- fH
@@ -252,7 +253,7 @@ begin
                     v_RegStatus(5) := '1'; -- fV
                 end if;
 
-            when b"11011" => -- DECB (Decrement B → ACC)
+            when OP_DEB => -- DECB (Decrement B → ACC)
                 -- El resultado de B-1 sale por ACC; la UC lo enruta hacia el registro B.
                 nibble_res := nibbleB_ext - 1;
                 v_RegStatus(6) := not nibble_res(4); -- fH
