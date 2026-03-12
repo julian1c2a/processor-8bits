@@ -2,8 +2,8 @@
 
 ## Procesador de 8 bits con bus de direcciones de 16 bits
 
-> **Estado: borrador v0.6** — BRAM True Dual-Port (Port B exclusivo de stack); BSR rel8 (3 ciclos); Link Register LR 16 bits; Return Address Stack (RAS, 4 entradas hardware); CALL nn→4 cy, CALL([nn])→6 cy, RET→2 cy.
-> *(v0.5: pipeline 2 etapas DECODE|EXEC+WB; especulación BRAM; ADD16/SUB16; IN/OUT. v0.4: 450 MHz; UART1; timers atómicos. v0.3: NEG/INCB/DECB; indexado; I/O; PFQ; EA-adder; PUSH/POP 16 b.)*
+> **Estado: borrador v0.7** — Pipeline de 4 etapas FETCH|DECODE|EXEC|WB con hazard unit completa (forwarding + stalls).
+> *(v0.6: BRAM TDP Port B exclusivo de stack; BSR rel8; LR; RAS 4 entradas; CALL nn→4 cy, RET→2 cy. v0.5: pipeline 2 etapas DECODE|EXEC+WB; especulación BRAM; ADD16/SUB16; IN/OUT. v0.4: 450 MHz; UART1; timers atómicos. v0.3: NEG/INCB/DECB; indexado; I/O; PFQ; EA-adder; PUSH/POP 16 b.)*
 
 ---
 
@@ -737,40 +737,56 @@ locales, paso de parámetros) tienen latencia de **1 ciclo**.
 
 ---
 
-### 10.5 Pipeline de 2 Etapas: DECODE | EXEC+WB
+### 10.5 Pipeline de 4 Etapas: FETCH | DECODE | EXEC | WB
 
-El DATA PATH se divide en dos etapas separadas por un **registro de pipeline**:
+El DATA PATH se divide en cuatro etapas separadas por **tres registros de pipeline**:
 
 ```
-  Ciclo N   ┌─ DECODE ─────────────────────────────────────────────────┐
-            │ • Lee PFQ[0:1]; decodifica opcode                        │
-            │ • Lee A, B (o inmediato del PFQ)                         │
-            │ • Emite señales de control para EXEC                     │
+  Ciclo N   ┌─ FETCH ───────────────────────────────────────────────────┐
+            │ • PC emite dirección al bus                               │
+            │ • Lee byte(s) de instrucción desde PFQ / BRAM            │
+            │ • Carga PFQ[0:1] con los bytes siguientes                 │
+            └──────────────────────────── pipeline register ──────────►
+  Ciclo N+1 ┌─ DECODE ──────────────────────────────────────────────────┐
+            │ • Decodifica opcode; determina modo de direccionamiento   │
+            │ • Lee A, B (o inmediato del PFQ)                          │
+            │ • Emite señales de control para EXEC                      │
             │ • Si dirección BRAM es conocida → la emite (ver §10.6)   │
             └──────────────────────────── pipeline register ──────────►
-  Ciclo N+1 ┌─ EXEC + WB ───────────────────────────────────────────────┐
+  Ciclo N+2 ┌─ EXEC ────────────────────────────────────────────────────┐
             │ • ALU ejecuta con entradas del pipeline register          │
-            │ • MDR captura dato BRAM (llegó por especulación)          │
+            │ • MDR captura dato BRAM (llegó por especulación §10.6)    │
+            │ • Acceso a memoria para modos LD/ST                       │
+            └──────────────────────────── pipeline register ──────────►
+  Ciclo N+3 ┌─ WB ──────────────────────────────────────────────────────┐
             │ • Resultado escribe en A / B  (Write-Back)                │
             └───────────────────────────────────────────────────────────┘
 ```
 
-**Forwarding bypass:** el resultado de WB en el ciclo N+1 se redirige a la
-entrada de DECODE del ciclo N+2 sin pasar por el banco de registros. Evita
-el stall que ocurriría en secuencias RAW consecutivas:
+**Hazard unit:** la separación de WB en etapa propia amplía la ventana de
+hazards RAW. La unidad de hazards implementa dos mecanismos:
 
-```asm
-  ADD #5    ; WB escribe A al final del ciclo 2
-  SUB #3    ; DECODE del ciclo 3 necesita A → bypass entrega A correcto
-```
+- **Forwarding (bypass):** el resultado de EXEC (N+2) o WB (N+3) se redirige
+  a la entrada de EXEC del ciclo siguiente, eliminando stalls en la mayoría
+  de secuencias RAW consecutivas:
 
-**Impacto en la palabra de microcode:** la microinstrucción tiene dos campos
-independientes, uno por etapa. La anchura total aumenta pero cada campo es
-más estrecho y simple que en un diseño de etapa única.
+  ```asm
+    ADD #5    ; WB escribe A al final del ciclo N+3
+    SUB #3    ; EXEC en ciclo N+3: necesita A → bypass desde WB entrega A correcto
+  ```
 
-**Restricción:** los saltos tomados causan flush del registro de pipeline y
-del PFQ (el PC pertenece al ADDRESS PATH, §10.0); el forwarding de datos no
-interactúa con los saltos.
+- **Stall (burbuja):** cuando el forwarding no es suficiente (p. ej.
+  dependencia sobre un `LD` en vuelo cuyo dato llega en WB) la UC inserta
+  una burbuja NOP en el registro DECODE→EXEC y detiene FETCH y DECODE un
+  ciclo.
+
+**Impacto en la palabra de microcode:** la microinstrucción tiene cuatro
+campos independientes, uno por etapa. La anchura total aumenta respecto al
+diseño de 2 etapas, pero cada campo es más estrecho y simple.
+
+**Restricción:** los saltos tomados causan flush de los tres registros de
+pipeline y del PFQ (el PC pertenece al ADDRESS PATH, §10.0); el forwarding
+de datos no interactúa con los saltos.
 
 ---
 
@@ -779,7 +795,7 @@ interactúa con los saltos.
 Cuando la dirección de acceso a BRAM es determinísticamente conocida antes
 de que finalice la etapa DECODE, la UC la emite al bus de direcciones en ese
 mismo ciclo. La BRAM (RAMB18/RAMB36) tiene latencia de **1 ciclo síncrono
-exacto**: el dato queda disponible al inicio de EXEC+WB.
+exacto**: el dato queda disponible al inicio de EXEC.
 
 | Modo de acceso    | Dirección conocida en     | ¿Especulable? | Ganancia vs v0.4      |
 |-------------------|---------------------------|---------------|-----------------------|
@@ -792,7 +808,7 @@ exacto**: el dato queda disponible al inicio de EXEC+WB.
 | Bus I/O           | —                         | **No**        | 0 (protocolo propio)  |
 
 **Mecanismo:** la UC emite `ADDR` + `EN` al RAMB18 al final de DECODE con el
-flanco de reloj. El dato llega al inicio de EXEC+WB. Si durante DECODE se
+flanco de reloj. El dato llega al inicio de EXEC. Si durante DECODE se
 detecta un salto tomado, la UC descarta el dato recibido sin escribirlo en
 ningún registro (especulación anulada, sin efecto visible al programador).
 
@@ -817,7 +833,7 @@ de control, operables en el mismo ciclo de reloj.
 la escritura del retorno en la pila (Port B) ocurren **en el mismo ciclo**,
 eliminando la dependencia secuencial que imponía la arquitectura de puerto único.
 
-| Instrucción    | Port A (ciclo EXEC)              | Port B (ciclo EXEC)              |
+| Instrucción    | Port A (etapa EXEC)              | Port B (etapa EXEC)              |
 |----------------|----------------------------------|----------------------------------|
 | `CALL nn`      | primer fetch desde nn            | M[SP−2] ← ret\_addr              |
 | `CALL ([nn])`  | fetch target\_lo / \_hi          | M[SP−2] ← ret\_addr              |
@@ -851,18 +867,18 @@ al final de DECODE**:
 Micro-pasos con TDP:
 
 ```
-  Ciclo 1  [DECODE]   PFQ[0]=0xF0, PFQ[1]=rel8
-                      Paralelo:  target   = PC + sign_ext(rel8)  (EA adder)
+  Ciclo 1  [FETCH]    PFQ[0]=0xF0, PFQ[1]=rel8
+  Ciclo 2  [DECODE]   Paralelo:  target   = PC + sign_ext(rel8)  (EA adder)
                                  ret_addr = PC + 2
                                  SP_new   = SP − 2
                       RAS.push(ret_addr)          ← sin coste extra
                       LR ← ret_addr               ← escribe LR
-  Ciclo 2  [EXEC]     Port A: primer fetch desde target  (PFQ refill)
+  Ciclo 3  [EXEC]     Port A: primer fetch desde target  (PFQ refill)
                       Port B: M[SP_new] ← ret_addr       (push)
-  Ciclo 3             SP ← SP_new; PFQ[0] válido desde target
+  Ciclo 4  [WB]       SP ← SP_new; PFQ[0] válido desde target
 ```
 
-**BSR rel8: 3 ciclos** (límite teórico para instrucción de 2 bytes con push).
+**BSR rel8: 4 ciclos** con pipeline de 4 etapas.
 
 **Link Register (LR)** — registro de 16 bits visible al programador:
 
@@ -896,15 +912,15 @@ del stack de software.
 
 **Operación:**
 
-| Evento                         | Acción RAS                                           |
-|--------------------------------|------------------------------------------------------|
-| `CALL` / `BSR` ejecutado       | RAS\_push(ret\_addr)                                 |
-| `RET` detectado en DECODE      | Especula PC ← RAS\_top; emite fetch anticipado       |
-| Port B confirma M\[SP\] = X    | X == RAS\_top → correcto, 0 penalización             |
-|                                | X ≠ RAS\_top → cancelar fetch especulado, 1 ciclo extra |
-| Overflow (> 4 CALL anidados)   | Descarta entrada más antigua; predicción se degrada pero Port B siempre corrige |
-| Entrada a ISR                  | RAS **no** se modifica (la UC no ejecuta un CALL)    |
-| `RTI`                          | RAS **no** se consulta (Port B lee el PC directamente) |
+| Evento                       | Acción RAS                                                                      |
+|------------------------------|---------------------------------------------------------------------------------|
+| `CALL` / `BSR` ejecutado     | RAS\_push(ret\_addr)                                                            |
+| `RET` detectado en DECODE    | Especula PC = RAS\_top; emite fetch anticipado (etapa FETCH)                   |
+| Port B confirma M\[SP\] = X  | X == RAS\_top → correcto, 0 penalización                                        |
+|                              | X ≠ RAS\_top → cancelar fetch especulado, 1 ciclo extra                         |
+| Overflow (> 4 CALL anidados) | Descarta entrada más antigua; predicción se degrada pero Port B siempre corrige |
+| Entrada a ISR                | RAS **no** se modifica (la UC no ejecuta un CALL)                               |
+| `RTI`                        | RAS **no** se consulta (Port B lee el PC directamente)                          |
 
 **Ciclos de `RET` con RAS:**
 

@@ -4,11 +4,7 @@ Este archivo lista las funcionalidades de la ISA v0.6 que aún no están impleme
 
 ---
 
-## Prioridad Media (Instrucciones Faltantes en UC)
-
-- [ ] **Instrucciones Faltantes**
-    - [x] `JPN page8` (0x72) - Salto en la misma página.
-## Prioridad Baja (Optimizaciones y Arquitectura Avanzada v0.6)
+# Prioridad Baja (Optimizaciones y Arquitectura Avanzada v0.6)
 
 Estas características están definidas en la ISA pero requieren cambios estructurales significativos o son optimizaciones sobre la arquitectura actual.
 
@@ -16,7 +12,7 @@ Estas características están definidas en la ISA pero requieren cambios estruct
   - [x] Lógica de prioridad, registro `I`, secuencia de entrada (Push PC/F) y vectores implementada.
   - [x] Instrucciones `SEI`, `CLI`, `RTI` implementadas.
 
-- [ ] **Pipeline de 2 Etapas (`DECODE | EXEC+WB`)**
+- [ ] **Pipeline de 4 Etapas (`DECODE | EXEC | MEM | WB`)**
   - [ ] Reestructurar la `ControlUnit` y el `DataPath` para incluir registros de pipeline.
   - [ ] Implementar lógica de **forwarding** para evitar stalls.
 

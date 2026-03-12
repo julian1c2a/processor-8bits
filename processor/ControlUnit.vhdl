@@ -1,1241 +1,1418 @@
+--------------------------------------------------------------------------------
+-- File: ControlUnit.vhdl
+-- Description:
+--   4-Stage Pipelined Control Unit for the 8-bit processor.
+--   Architecture name: pipeline  (replaces the original "unique" FSM)
+--
+--   Pipeline stages
+--   ---------------
+--   IF  - FETCH: Assert ABUS=PC, Mem_RE=1.  At the rising edge the memory
+--         data bus (InstrIn) is captured into r_IF_ID and PC is incremented
+--         (PC_Op=INC is part of the combinatorial CtrlBus output when fetch
+--         is active).
+--
+--   ID  - DECODE: Examine r_IF_ID.opcode.
+--         1-byte instructions  -> build complete ctrl word in one cycle,
+--           write to r_ID_EX with is_single='1'.
+--         2-byte instructions  -> dss: DSS_OPCODE -> DSS_OP1 (fetch op1 first).
+--         3-byte instructions  -> dss: DSS_OPCODE -> DSS_OP1 -> DSS_OP2.
+--
+--   EX  - EXECUTE:
+--         Single-cycle (is_single='1'): r_ID_EX.ctrl drives CtrlBus for one clock.
+--         Multi-cycle  (is_multi='1'):  r_exec_IR/op1/op2 are latched and the
+--           ESS sub-state machine drives CtrlBus for all remaining cycles.
+--
+--   WB  - WRITE-BACK: Implicit at the rising edge ending the EX cycle.
+--
+--   Key pipeline overlap rule
+--   -------------------------
+--   While the EX stage runs a single-cycle ALU instruction (no memory bus
+--   needed) and there is no RAW hazard, FETCH of the next instruction can
+--   proceed simultaneously.
+--
+--   RAW Hazard detection
+--   --------------------
+--   If the instruction in ID/EX writes a register that is read by the
+--   instruction in IF/ID, DECODE is stalled for one cycle.
+--
+--   Branch/Jump flush
+--   -----------------
+--   When a taken branch is detected, both r_IF_ID and r_ID_EX are cleared.
+--
+-- Dependencies: CONSTANTS_pkg, ALU_pkg, DataPath_pkg, AddressPath_pkg,
+--               ControlUnit_pkg, Pipeline_pkg
+--------------------------------------------------------------------------------
+
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
 use work.CONSTANTS_pkg.ALL;
 use work.ALU_pkg.ALL;
 use work.DataPath_pkg.ALL;
 use work.AddressPath_pkg.ALL;
 use work.ControlUnit_pkg.ALL;
+use work.Pipeline_pkg.ALL;
 
 entity ControlUnit is
     Port (
         clk      : in  std_logic;
         reset    : in  std_logic;
-        
-        -- Inputs from DataPath/AddressPath
         FlagsIn  : in  status_vector;
-        InstrIn  : in  data_vector; -- Instruction byte from memory
-        Mem_Ready: in  std_logic;   -- Wait state input (active high)
-        IRQ      : in  std_logic;   -- Interrupt Request
-        NMI      : in  std_logic;   -- Non-Maskable Interrupt
-        
-        -- Output to the rest of the processor
+        InstrIn  : in  data_vector;
+        Mem_Ready: in  std_logic;
+        IRQ      : in  std_logic;
+        NMI      : in  std_logic;
         CtrlBus  : out control_bus_t
     );
 end entity ControlUnit;
 
-architecture unique of ControlUnit is
+architecture pipeline of ControlUnit is
 
-    -- Estados de la FSM principal
-    type state_type is (
-        S_RESET,
-        S_FETCH,        -- Leer opcode de memoria
-        S_DECODE,       -- Decodificar opcode y preparar siguiente paso
-        
-        -- Estados de Ejecución
-        S_EXEC_HALT,    -- Detener procesador
-        
-        S_EXEC_FLAGS,   -- Manipulación de flags (SEC, CLC)
-        
-        S_EXEC_LDI_1,   -- LD A, #n: Leer inmediato
-        S_EXEC_LDI_2,   -- LD A, #n: Escribir en A
-        
-        S_EXEC_MOV_AB,  -- LD A, B: Transferencia registro
-        
-        S_EXEC_MOV_BA,  -- LD B, A: Transferencia registro (0x20)
-        S_EXEC_LDI_B_1, -- LD B, #n: Leer inmediato (0x21)
-        S_EXEC_LDI_B_2, -- LD B, #n: Escribir en B
-        
-        S_EXEC_ALU_R,   -- ALU A, B (ADD, SUB, AND, OR...)
-        
-        S_EXEC_ALU_IMM_1, -- ALU A, #n: Fetch inmediato
-        S_EXEC_ALU_IMM_2, -- ALU A, #n: Execute & Write Back
-        
-        S_EXEC_ALU_UNARY, -- Operaciones unarias ALU (Shift, Rotate, etc.)
-        
-        S_EXEC_PUSH_1,    -- PUSH: Decrementar SP
-        S_EXEC_PUSH_2,    -- PUSH: Escribir byte bajo
-        S_EXEC_PUSH_3,    -- PUSH: Escribir byte alto (0x00)
-        
-        S_EXEC_PUSH_F_2,  -- PUSH F: Escribir F
-        
-        S_EXEC_POP_1,     -- POP: Leer byte bajo
-        S_EXEC_POP_2,     -- POP: Guardar en Reg y Incrementar SP
-        
-        S_EXEC_POP_F_2,   -- POP F: Guardar en F
-        
-        S_EXEC_POP_AB_2,  -- POP A:B: Guardar B y Leer byte alto
-        S_EXEC_POP_AB_3,  -- POP A:B: Guardar A y restaurar SP
-        
-        S_EXEC_CALL_1,    -- CALL: Leer destino LOW
-        S_EXEC_CALL_2,    -- CALL: Leer destino HIGH
-        S_EXEC_CALL_3,    -- CALL: Decrementar SP
-        S_EXEC_CALL_4,    -- CALL: Push PC LOW
-        S_EXEC_CALL_5,    -- CALL: Push PC HIGH
-        S_EXEC_CALL_6,    -- CALL: Cargar PC destino
+    -- Pipeline registers
+    signal r_IF_ID : IF_ID_reg_t := NOP_IF_ID;
+    signal r_ID_EX : ID_EX_reg_t := NOP_ID_EX;
 
-        S_EXEC_RET_1,     -- RET: Leer PC LOW desde Stack
-        S_EXEC_RET_2,     -- RET: Leer PC HIGH desde Stack
-        S_EXEC_RET_3,     -- RET: Cargar PC y restaurar SP
+    -- Sub-state machines
+    signal dss : dss_t := DSS_OPCODE;
+    signal ess : ess_t := ESS_IDLE;
 
-        S_EXEC_RTI_1,     -- RTI: Pop F (read)
-        S_EXEC_RTI_2,     -- RTI: Pop F (write) + Pop PC L (read)
-        S_EXEC_RTI_3,     -- RTI: Pop PC L (store) + Pop PC H (read)
-        S_EXEC_RTI_4,     -- RTI: Pop PC H (store/load PC)
+    -- Latched operands for ESS dispatch
+    signal r_exec_IR  : data_vector := x"00";
+    signal r_exec_op1 : data_vector := x"00";
+    signal r_exec_op2 : data_vector := x"00";
 
-        S_INT_PUSH_PC_1,  -- INT Entry: Push PC (SP dec)
-        S_INT_PUSH_PC_2,  -- INT Entry: Push PC Low
-        S_INT_PUSH_PC_3,  -- INT Entry: Push PC High
-        S_INT_PUSH_F_1,   -- INT Entry: Push F (SP dec)
-        S_INT_PUSH_F_2,   -- INT Entry: Push F (Write F)
-        S_INT_PUSH_F_3,   -- INT Entry: Push F (Write 00)
-        S_INT_VEC_1,      -- INT Entry: Fetch Vector Low
-        S_INT_VEC_2,      -- INT Entry: Fetch Vector High
-        S_INT_VEC_3,      -- INT Entry: Load PC
+    -- Interrupt / status
+    signal I_Flag       : std_logic := '0';
+    signal handling_nmi : std_logic := '0';
 
-        S_EXEC_ADDR_FETCH_HI, -- LD/ST [nn] o [nn+B]: Leer byte alto de la dirección base
-        S_EXEC_PZ_FETCH,      -- LD/ST [n]: Cargar dirección de página cero en TMP
-        S_EXEC_INDB_SETUP,    -- LD/ST [B]: Preparar TMP para cálculo de dirección
-        S_EXEC_LD_ABS_READ,  -- LD A, [nn]: Leer dato de memoria
-        S_EXEC_LD_IDX_READ,  -- LD A, [nn+B]: Calcular EA y leer dato
-        S_EXEC_LD_WB,        -- LD A, [...]: Escribir dato en A (Write-Back)
-        S_EXEC_ST_ABS_WRITE, -- ST A, [nn]: Escribir dato en memoria
-        S_EXEC_ST_IDX_WRITE, -- ST A, [nn+B]: Calcular EA y escribir dato
-        
-        S_EXEC_IO_FETCH_PORT, -- IN/OUT #n: Leer número de puerto
-        S_EXEC_IO_SETUP_REG,  -- IN/OUT [B]: Preparar direccionamiento indirecto
-        S_EXEC_IN_READ,       -- IN: Leer del bus I/O
-        S_EXEC_IN_WB,         -- IN: Escribir en A
-        S_EXEC_OUT_WRITE,     -- OUT: Escribir en bus I/O
-        
-        S_EXEC_OP16_FETCH_1,  -- 16-bit Ops: Leer operando
-        S_EXEC_OP16_IMM8_WB1, -- 16-bit Ops #n: Exec & Write-Back High
-        S_EXEC_OP16_WB_1,     -- 16-bit Ops #nn: Write-Back High (A) + Flags
-        S_EXEC_OP16_WB_2,     -- 16-bit Ops: Write-Back Low (B) Common
-        
-        S_EXEC_LDSP_1,        -- LD SP, #nn: Leer byte bajo
-        S_EXEC_LDSP_2,        -- LD SP, #nn: Leer byte alto y cargar SP
-        S_EXEC_LDSP_AB,       -- LD SP, A:B: Cargar SP desde registros
-        S_EXEC_STSP_WB,       -- ST SP_L/H, A: Guardar parte del SP en A
-        
-        S_EXEC_BRANCH_REL_1, -- BEQ rel8: Fetch operando y cálculo de dirección
-        S_EXEC_BRANCH_REL_2, -- BEQ rel8: Carga de PC si salto se toma
-        S_SKIP_BYTE,         -- Estado para saltar un byte (operandos no usados)
-        
-        S_EXEC_IND_LOAD_PTR, -- JP/CALL ([nn]): PC <- TMP (para leer puntero)
-        S_EXEC_IND_READ_L,   -- JP/CALL ([nn]): Leer byte bajo destino
-        S_EXEC_IND_READ_H,   -- JP/CALL ([nn]): Leer byte alto destino
-        
-        S_EXEC_JP_1,    -- JP nn: Leer byte bajo
-        S_EXEC_JP_2,    -- JP nn: Leer byte alto
-        S_EXEC_JP_3,    -- JP nn: Cargar PC
-        S_EXEC_JP_AB,   -- JP A:B: Cargar PC desde registros
-        S_EXEC_JPN      -- JPN page8: Cargar byte bajo PC
-    );
+    -- =========================================================================
+    -- Helper functions
+    -- =========================================================================
 
-    signal state, next_state : state_type;
-    
-    -- Registro de Instrucción (Opcode)
-    signal r_IR : data_vector;
-    
-    -- Registros internos de la UC
-    signal I_Flag : std_logic := '0'; -- Interrupt Enable Flag (0=Disabled, 1=Enabled)
-    signal handling_nmi : std_logic := '0'; -- Estado interno para distinguir NMI vs IRQ durante vector fetch
+    function branch_taken_f(opcode : data_vector; flags : status_vector) return boolean is
+    begin
+        case opcode is
+            when x"80"  => return flags(idx_fZ) = '1';
+            when x"81"  => return flags(idx_fZ) = '0';
+            when x"82"  => return flags(idx_fC) = '1';
+            when x"83"  => return flags(idx_fC) = '0';
+            when x"84"  => return flags(idx_fV) = '1';
+            when x"85"  => return flags(idx_fV) = '0';
+            when x"86"  => return flags(idx_fG) = '1';
+            when x"87"  => return flags(idx_fG) = '0';
+            when x"88"  => return (flags(idx_fG) = '1') or (flags(idx_fE) = '1');
+            when x"89"  => return (flags(idx_fG) = '0') and (flags(idx_fE) = '0');
+            when x"8A"  => return flags(idx_fH) = '1';
+            when x"8B"  => return flags(idx_fE) = '1';
+            when x"71"  => return true;
+            when others => return false;
+        end case;
+    end function;
+
+    function reads_a_f(op : data_vector) return std_logic is
+    begin
+        case op is
+            when x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"|x"97" => return '1';
+            when x"A0"|x"A1"|x"A2"|x"A3"|x"A4"|x"A5"|x"A6"|x"A7" => return '1';
+            when x"C0"|x"C1"|x"C2"|x"C3"|x"C6"|x"C7"             => return '1';
+            when x"C8"|x"C9"|x"CA"|x"CB"|x"CC"|x"CD"|x"CE"       => return '1';
+            when x"30"|x"31"|x"32"|x"33"|x"34"                    => return '1';
+            when x"60"|x"63"                                       => return '1';
+            when x"20"                                             => return '1';
+            when x"D2"|x"D3"                                       => return '1';
+            when x"E0"|x"E1"|x"E2"|x"E3"                          => return '1';
+            when x"51"|x"52"|x"53"                                 => return '1';
+            when x"02"|x"03"                                       => return '1';
+            when others => return '0';
+        end case;
+    end function;
+
+    function reads_b_f(op : data_vector) return std_logic is
+    begin
+        case op is
+            when x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"|x"97" => return '1';
+            when x"C4"|x"C5"                                       => return '1';
+            when x"10"                                             => return '1';
+            when x"14"|x"24"                                       => return '1';
+            when x"15"|x"16"                                       => return '1';
+            when x"25"                                             => return '1';
+            when x"32"|x"33"|x"34"                                => return '1';
+            when x"42"                                             => return '1';
+            when x"61"|x"63"                                       => return '1';
+            when x"D1"|x"D3"                                       => return '1';
+            when x"E0"|x"E1"|x"E2"|x"E3"                          => return '1';
+            when x"51"                                             => return '1';
+            when others => return '0';
+        end case;
+    end function;
+
+    function writes_a_f(op : data_vector) return std_logic is
+    begin
+        case op is
+            when x"10"|x"11"|x"12"|x"13"|x"14"|x"15"|x"16"       => return '1';
+            when x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"       => return '1';
+            when x"A0"|x"A1"|x"A2"|x"A3"|x"A4"|x"A5"|x"A6"       => return '1';
+            when x"C0"|x"C1"|x"C2"|x"C3"|x"C6"|x"C7"             => return '1';
+            when x"C8"|x"C9"|x"CA"|x"CB"|x"CC"|x"CD"|x"CE"       => return '1';
+            when x"64"|x"67"                                       => return '1';
+            when x"D0"|x"D1"                                       => return '1';
+            when x"E0"|x"E1"|x"E2"|x"E3"                          => return '1';
+            when x"52"|x"53"                                       => return '1';
+            when others => return '0';
+        end case;
+    end function;
+
+    function writes_b_f(op : data_vector) return std_logic is
+    begin
+        case op is
+            when x"20"|x"21"|x"22"|x"23"|x"24"|x"25"             => return '1';
+            when x"C4"|x"C5"                                       => return '1';
+            when x"65"|x"67"                                       => return '1';
+            when x"E0"|x"E1"|x"E2"|x"E3"                          => return '1';
+            when others => return '0';
+        end case;
+    end function;
+
+    -- Build a complete ctrl word for single-cycle ALU-register ops (0x90..0x97)
+    function build_alu_reg(opcode : data_vector) return control_bus_t is
+        variable c  : control_bus_t := INIT_CTRL_BUS;
+    begin
+        c.Reg_Sel     := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
+        c.ALU_Bin_Sel := '0';
+        c.Bus_Op      := ACC_ALU_elected;
+        c.Write_F     := '1';
+        c.Write_A     := '1';
+        case opcode is
+            when x"90" => c.ALU_Op := OP_ADD; c.Flag_Mask := x"FF";
+            when x"91" => c.ALU_Op := OP_ADC; c.Flag_Mask := x"FC";
+            when x"92" => c.ALU_Op := OP_SUB; c.Flag_Mask := x"FF";
+            when x"93" => c.ALU_Op := OP_SBB; c.Flag_Mask := x"FC";
+            when x"94" => c.ALU_Op := OP_AND; c.Flag_Mask := x"1C";
+            when x"95" => c.ALU_Op := OP_IOR; c.Flag_Mask := x"1C";
+            when x"96" => c.ALU_Op := OP_XOR; c.Flag_Mask := x"1C";
+            when x"97" => c.ALU_Op := OP_CMP; c.Flag_Mask := x"FF"; c.Write_A := '0';
+            when others => null;
+        end case;
+        return c;
+    end function;
+
+    -- Build a complete ctrl word for ALU-immediate ops (0xA0..0xA7)
+    -- The immediate operand is in MDR (MDR_WE was asserted during operand fetch)
+    function build_alu_imm(opcode : data_vector) return control_bus_t is
+        variable c : control_bus_t := INIT_CTRL_BUS;
+    begin
+        c.ALU_Bin_Sel := '1'; -- B input = MDR
+        c.Bus_Op      := ACC_ALU_elected;
+        c.Write_F     := '1';
+        c.Write_A     := '1';
+        case opcode is
+            when x"A0" => c.ALU_Op := OP_ADD; c.Flag_Mask := x"FF";
+            when x"A1" => c.ALU_Op := OP_ADC; c.Flag_Mask := x"FC";
+            when x"A2" => c.ALU_Op := OP_SUB; c.Flag_Mask := x"FF";
+            when x"A3" => c.ALU_Op := OP_SBB; c.Flag_Mask := x"FC";
+            when x"A4" => c.ALU_Op := OP_AND; c.Flag_Mask := x"1C";
+            when x"A5" => c.ALU_Op := OP_IOR; c.Flag_Mask := x"1C";
+            when x"A6" => c.ALU_Op := OP_XOR; c.Flag_Mask := x"1C";
+            when x"A7" => c.ALU_Op := OP_CMP; c.Flag_Mask := x"FF"; c.Write_A := '0';
+            when others => null;
+        end case;
+        return c;
+    end function;
+
+    -- Build ctrl word for ALU unary ops (0xC0..0xCE)
+    function build_alu_unary(opcode : data_vector) return control_bus_t is
+        variable c : control_bus_t := INIT_CTRL_BUS;
+    begin
+        c.Bus_Op  := ACC_ALU_elected;
+        c.Write_F := '1';
+        if opcode = x"C4" or opcode = x"C5" then
+            c.Write_B := '1';
+            c.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
+        else
+            c.Write_A := '1';
+        end if;
+        case opcode is
+            when x"C0" => c.ALU_Op := OP_NOT; c.Flag_Mask := x"10";
+            when x"C1" => c.ALU_Op := OP_NEG; c.Flag_Mask := x"F0";
+            when x"C2" => c.ALU_Op := OP_INC; c.Flag_Mask := x"F0";
+            when x"C3" => c.ALU_Op := OP_DEC; c.Flag_Mask := x"F0";
+            when x"C4" => c.ALU_Op := OP_INB; c.Flag_Mask := x"F0";
+            when x"C5" => c.ALU_Op := OP_DEB; c.Flag_Mask := x"F0";
+            when x"C6" => c.ALU_Op := OP_CLR; c.Flag_Mask := x"10";
+            when x"C7" => c.ALU_Op := OP_SET; c.Flag_Mask := x"10";
+            when x"C8" => c.ALU_Op := OP_LSL; c.Flag_Mask := x"11";
+            when x"C9" => c.ALU_Op := OP_LSR; c.Flag_Mask := x"12";
+            when x"CA" => c.ALU_Op := OP_ASL; c.Flag_Mask := x"31";
+            when x"CB" => c.ALU_Op := OP_ASR; c.Flag_Mask := x"12";
+            when x"CC" => c.ALU_Op := OP_ROL; c.Flag_Mask := x"10";
+            when x"CD" => c.ALU_Op := OP_ROR; c.Flag_Mask := x"10";
+            when x"CE" => c.ALU_Op := OP_SWP; c.Flag_Mask := x"10";
+            when others => null;
+        end case;
+        return c;
+    end function;
 
 begin
 
     -- =========================================================================
-    -- 1. Proceso Secuencial (Memoria de Estado)
+    -- Sequential Process
     -- =========================================================================
-    seq_proc: process(clk, reset)
+    seq_proc : process(clk, reset)
+        variable v_raw   : boolean;
+        variable v_taken : boolean;
+        variable v_nop   : ID_EX_reg_t;
+        variable v_c     : control_bus_t;
     begin
         if reset = '1' then
-            state <= S_RESET;
-            r_IR  <= (others => '0');
-            I_Flag <= '0'; -- Interrupciones deshabilitadas al inicio
+            r_IF_ID      <= NOP_IF_ID;
+            r_ID_EX      <= NOP_ID_EX;
+            dss          <= DSS_OPCODE;
+            ess          <= ESS_IDLE;
+            r_exec_IR    <= x"00";
+            r_exec_op1   <= x"00";
+            r_exec_op2   <= x"00";
+            I_Flag       <= '0';
+            handling_nmi <= '0';
+
         elsif rising_edge(clk) then
-            state <= next_state;
-            
-            -- Latch del Instruction Register (IR)
-            -- Capturamos el opcode al final del ciclo FETCH (transición a DECODE)
-            if state = S_FETCH then
-                r_IR <= InstrIn;
-            end if;
-        end if;
-    end process;
 
-    -- =========================================================================
-    -- 2. Lógica Combinacional (Salida y Próximo Estado)
-    -- =========================================================================
-    comb_proc: process(state, r_IR, InstrIn, FlagsIn)
-        variable v_ctrl : control_bus_t;
-        variable v_branch_taken : boolean; -- Variable local para evaluar condiciones
-    begin
-        -- Valores por defecto (NOP seguro) para evitar latches inferidos
-        v_ctrl := INIT_CTRL_BUS;
-        v_branch_taken := false;
-        next_state <= state; -- Por defecto mantenemos estado (o S_RESET si algo falla)
-
-        case state is
-            -- -----------------------------------------------------------------
-            -- RESET & FETCH
-            -- -----------------------------------------------------------------
-            when S_RESET =>
-                next_state <= S_FETCH;
-
-            when S_FETCH =>
-                -- Acceso a Memoria: Leer Opcode en [PC]
-                v_ctrl.ABUS_Sel := ABUS_SRC_PC;
-                v_ctrl.Mem_RE   := '1';
-                
-                -- Chequeo de Interrupciones (Prioridad: NMI > IRQ)
-                -- Si hay espera de memoria (Mem_Ready=0), no cambiamos de estado,
-                -- pero la decisión de ir a INT o DECODE se hace cuando se completa el fetch.
-                if (NMI = '1') or (IRQ = '1' and I_Flag = '1') then
-                    next_state <= S_INT_PUSH_PC_1; -- Ir a secuencia de interrupción
-                else
-                    next_state <= S_DECODE;
-                end if;
-
-            when S_DECODE =>
-                -- En este punto, r_IR tiene el opcode actual.
-                -- El PC todavía apunta al opcode. Debemos incrementarlo para
-                -- apuntar al siguiente byte (operando o siguiente instrucción).
-                v_ctrl.PC_Op := PC_OP_INC;
-
-                -- Decodificación de instrucciones (Opcode Dispatch)
-                case r_IR is
-                    -- NOP (0x00)
-                    when x"00" => 
-                        next_state <= S_FETCH; -- Ya incrementamos PC, listo para siguiente
-                    
-                    -- HALT (0x01)
-                    when x"01" => 
-                        next_state <= S_EXEC_HALT;
-                        
-                    -- SEC (0x02) / CLC (0x03)
-                    when x"02" | x"03" =>
-                        next_state <= S_EXEC_FLAGS;
-                        
-                    -- SEI (0x04) / CLI (0x05)
-                    when x"04" | x"05" =>
-                        -- Lógica en proceso secuencial (I_Flag)
-                        next_state <= S_FETCH;
-                        
-                    -- RTI (0x06)
-                    when x"06" =>
-                        next_state <= S_EXEC_RTI_1;
-
-                    -- LD A, B (0x10)
-                    when x"10" =>
-                        next_state <= S_EXEC_MOV_AB;
-
-                    -- LD A, #n (0x11)
-                    when x"11" =>
-                        next_state <= S_EXEC_LDI_1;
-
-                    -- LD A, [n] (0x12)
-                    when x"12" =>
-                        v_ctrl.Load_TMP_L := '1';
-                        next_state <= S_EXEC_ADDR_FETCH_HI;
-
-                    -- LD A, [nn] (0x13)
-                    when x"13" =>
-                        v_ctrl.Load_TMP_L := '1';
-                        next_state <= S_EXEC_ADDR_FETCH_HI;
-
-                    -- LD A, [nn+B] (0x15)
-                    when x"15" =>
-                        v_ctrl.Load_TMP_L := '1';
-                        next_state <= S_EXEC_ADDR_FETCH_HI;
-
-                    -- LD A, [n+B] (0x16)
-                    when x"16" =>
-                        v_ctrl.Load_TMP_L := '1'; -- Carga 'n'
-                        next_state <= S_EXEC_PZ_FETCH;
-
-                    -- LD A, [B] (0x14)
-                    when x"14" =>
-                        next_state <= S_EXEC_INDB_SETUP;
-
-                    -- LD B, A (0x20) - NUEVO
-                    when x"20" =>
-                        next_state <= S_EXEC_MOV_BA;
-
-                    -- LD B, #n (0x21) - NUEVO
-                    when x"21" =>
-                        next_state <= S_EXEC_LDI_B_1;
-
-                    -- LD B, [n] (0x22), [nn] (0x23), [B] (0x24), [nn+B] (0x25)
-                    when x"22" | x"23" | x"24" | x"25" =>
-                        v_ctrl.Load_TMP_L := '1'; -- Carga el primer operando (n o nn_low)
-                        next_state <= S_EXEC_ADDR_FETCH_HI;
-
-                    -- ST A, [n] (0x30)
-                    when x"30" =>
-                        v_ctrl.Load_TMP_L := '1';
-                        next_state <= S_EXEC_ADDR_FETCH_HI;
-
-                    -- ST A, [nn] (0x31)
-                    when x"31" =>
-                        v_ctrl.Load_TMP_L := '1';
-                        next_state <= S_EXEC_ADDR_FETCH_HI;
-
-                    -- ST A, [nn+B] (0x33)
-                    when x"33" =>
-                        v_ctrl.Load_TMP_L := '1';
-                        next_state <= S_EXEC_ADDR_FETCH_HI;
-
-                    -- ST A, [n+B] (0x34)
-                    when x"34" =>
-                        v_ctrl.Load_TMP_L := '1'; -- Carga 'n'
-                        next_state <= S_EXEC_PZ_FETCH;
-
-                    -- ST A, [B] (0x32)
-                    when x"32" =>
-                        next_state <= S_EXEC_INDB_SETUP;
-
-                    -- ST B, [n] (0x40), [nn] (0x41), [nn+B] (0x42)
-                    when x"40" | x"41" | x"42" =>
-                        v_ctrl.Load_TMP_L := '1';
-                        next_state <= S_EXEC_ADDR_FETCH_HI;
-
-                    -- LD SP, #nn (0x50)
-                    when x"50" =>
-                        v_ctrl.Load_TMP_L := '1';
-                        next_state <= S_EXEC_LDSP_1;
-
-                    -- LD SP, A:B (0x51)
-                    when x"51" =>
-                        next_state <= S_EXEC_LDSP_AB;
-
-                    -- ST SP_L, A (0x52) / ST SP_H, A (0x53)
-                    when x"52" | x"53" =>
-                        next_state <= S_EXEC_STSP_WB;
-
-                    -- IN A, #n (0xD0) / OUT #n, A (0xD2)
-                    when x"D0" | x"D2" =>
-                        v_ctrl.Load_TMP_L := '1'; -- Cargar operando #n en TMP para usarlo como dirección
-                        next_state <= S_EXEC_IO_FETCH_PORT;
-
-                    -- IN A, [B] (0xD1) / OUT [B], A (0xD3)
-                    when x"D1" | x"D3" =>
-                        -- Direccionamiento indirecto [B]. B ya está en el registro.
-                        next_state <= S_EXEC_IO_SETUP_REG;
-
-                    -- ADD16 #n (0xE0), SUB16 #n (0xE2)
-                    when x"E0" | x"E2" =>
-                        -- El operando está en PC+1 (siguiente ciclo). Vamos a fetch/exec.
-                        next_state <= S_EXEC_OP16_IMM8_WB1;
-
-                    -- ADD16 #nn (0xE1), SUB16 #nn (0xE3)
-                    when x"E1" | x"E3" =>
-                        -- Fetch primer byte a TMP_L.
-                        v_ctrl.Load_TMP_L := '1';
-                        v_ctrl.Mem_RE     := '1'; -- Necesario activar lectura aquí para latchear en TMP
-                        v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                        v_ctrl.PC_Op      := PC_OP_INC;
-                        next_state <= S_EXEC_OP16_FETCH_1;
-
-                    -- ALU Register Ops (A op B) -> A
-                    -- ADD(90), ADC(91), SUB(92), SBB(93), AND(94), OR(95), XOR(96), CMP(97)
-                    when x"90" | x"91" | x"92" | x"93" | x"94" | x"95" | x"96" | x"97" =>
-                        next_state <= S_EXEC_ALU_R;
-
-                    -- ALU Immediate Ops (A op #n) -> A
-                    -- ADD#(A0), ADC#(A1), SUB#(A2), SBB#(A3), AND#(A4), OR#(A5), XOR#(A6), CMP#(A7)
-                    when x"A0" | x"A1" | x"A2" | x"A3" | x"A4" | x"A5" | x"A6" | x"A7" =>
-                        next_state <= S_EXEC_ALU_IMM_1;
-
-                    -- Shift/Rotate Ops (A)
-                    -- Unary ops: NOT,NEG,INC,DEC,Shifts,Rotates, CLR, SET, SWAP
-                    when x"C0" | x"C1" | x"C2" | x"C3" | x"C4" | x"C5" | x"C6" | x"C7" | x"C8" | x"C9" | x"CA" | x"CB" | x"CC" | x"CD" | x"CE" =>
-                        next_state <= S_EXEC_ALU_UNARY;
-
-                    -- Saltos Condicionales (0x80 - 0x8B)
-                    when x"80" | x"81" | x"82" | x"83" | x"84" | x"85" | 
-                         x"86" | x"87" | x"88" | x"89" | x"8A" | x"8B" =>
-                        
-                        case r_IR is
-                            when x"80" => if FlagsIn(idx_fZ) = '1' then v_branch_taken := true; end if; -- BEQ (Z=1)
-                            when x"81" => if FlagsIn(idx_fZ) = '0' then v_branch_taken := true; end if; -- BNE (Z=0)
-                            when x"82" => if FlagsIn(idx_fC) = '1' then v_branch_taken := true; end if; -- BCS (C=1)
-                            when x"83" => if FlagsIn(idx_fC) = '0' then v_branch_taken := true; end if; -- BCC (C=0)
-                            when x"84" => if FlagsIn(idx_fV) = '1' then v_branch_taken := true; end if; -- BVS (V=1)
-                            when x"85" => if FlagsIn(idx_fV) = '0' then v_branch_taken := true; end if; -- BVC (V=0)
-                            when x"86" => if FlagsIn(idx_fG) = '1' then v_branch_taken := true; end if; -- BGT (G=1)
-                            when x"87" => if FlagsIn(idx_fG) = '0' then v_branch_taken := true; end if; -- BLE (G=0)
-                            when x"88" => if (FlagsIn(idx_fG) = '1' or FlagsIn(idx_fE) = '1') then v_branch_taken := true; end if; -- BGE
-                            when x"89" => if (FlagsIn(idx_fG) = '0' and FlagsIn(idx_fE) = '0') then v_branch_taken := true; end if; -- BLT
-                            when x"8A" => if FlagsIn(idx_fH) = '1' then v_branch_taken := true; end if; -- BHC (H=1)
-                            when x"8B" => if FlagsIn(idx_fE) = '1' then v_branch_taken := true; end if; -- BEQ2 (E=1)
-                            when others => null;
+            if ess /= ESS_IDLE then
+                -- ============================================================
+                -- ESS: advance execution sub-state
+                -- ============================================================
+                case ess is
+                    when ESS_ADDR_HI =>
+                        case r_exec_IR is
+                            when x"13"|x"23"             => ess <= ESS_LD_ABS;
+                            when x"15"|x"25"             => ess <= ESS_LD_IDX;
+                            when x"31"|x"41"             => ess <= ESS_ST_ABS;
+                            when x"33"|x"42"             => ess <= ESS_ST_IDX;
+                            when x"12"|x"22"|x"30"|x"40" => ess <= ESS_PZ_FETCH;
+                            when x"14"|x"24"|x"32"       => ess <= ESS_INDB_SETUP;
+                            when x"73"                   => ess <= ESS_IND_LOAD;
+                            when x"76"                   => ess <= ESS_CALL_3;
+                            when others                  => ess <= ESS_IDLE;
                         end case;
 
-                        if v_branch_taken then
-                            next_state <= S_EXEC_BRANCH_REL_1;
+                    when ESS_PZ_FETCH =>
+                        if unsigned(r_exec_IR) < x"30" then
+                            if r_exec_IR = x"16" then ess <= ESS_LD_IDX;
+                            else                      ess <= ESS_LD_ABS; end if;
                         else
-                            next_state <= S_SKIP_BYTE;
+                            if r_exec_IR = x"34" then ess <= ESS_ST_IDX;
+                            else                      ess <= ESS_ST_ABS; end if;
                         end if;
 
-                    -- PUSH A (0x60)
-                    when x"60" =>
-                        next_state <= S_EXEC_PUSH_1;
+                    when ESS_INDB_SETUP =>
+                        if r_exec_IR = x"32" then ess <= ESS_ST_IDX;
+                        else                      ess <= ESS_LD_IDX; end if;
 
-                    -- PUSH B (0x61)
-                    when x"61" =>
-                        next_state <= S_EXEC_PUSH_1;
+                    when ESS_LD_ABS  => ess <= ESS_LD_WB;
+                    when ESS_LD_IDX  => ess <= ESS_LD_WB;
+                    when ESS_LD_WB   => ess <= ESS_IDLE;
+                    when ESS_ST_ABS  => ess <= ESS_IDLE;
+                    when ESS_ST_IDX  => ess <= ESS_IDLE;
 
-                    -- PUSH F (0x62)
-                    when x"62" =>
-                        next_state <= S_EXEC_PUSH_1;
+                    when ESS_PUSH_1  => ess <= ESS_PUSH_2;
+                    when ESS_PUSH_2  => ess <= ESS_PUSH_3;
+                    when ESS_PUSH_3  => ess <= ESS_IDLE;
 
-                    -- PUSH A:B (0x63)
-                    when x"63" =>
-                        next_state <= S_EXEC_PUSH_1;
+                    when ESS_POP_1 =>
+                        if r_exec_IR = x"67" then ess <= ESS_POP_AB_2;
+                        else                      ess <= ESS_POP_2; end if;
+                    when ESS_POP_2 =>
+                        if r_exec_IR = x"66" then ess <= ESS_POP_F_2;
+                        else                      ess <= ESS_IDLE; end if;
+                    when ESS_POP_F_2  => ess <= ESS_IDLE;
+                    when ESS_POP_AB_2 => ess <= ESS_POP_AB_3;
+                    when ESS_POP_AB_3 => ess <= ESS_IDLE;
 
-                    -- POP A (0x64)
-                    when x"64" =>
-                        next_state <= S_EXEC_POP_1;
+                    when ESS_CALL_1 => ess <= ESS_CALL_2;
+                    when ESS_CALL_2 => ess <= ESS_CALL_3;
+                    when ESS_CALL_3 => ess <= ESS_CALL_4;
+                    when ESS_CALL_4 => ess <= ESS_CALL_5;
+                    when ESS_CALL_5 =>
+                        if r_exec_IR = x"76" then ess <= ESS_IND_LOAD;
+                        else                      ess <= ESS_CALL_6; end if;
+                    when ESS_CALL_6 => ess <= ESS_IDLE;
 
-                    -- POP B (0x65)
-                    when x"65" =>
-                        next_state <= S_EXEC_POP_1;
+                    when ESS_RET_1 => ess <= ESS_RET_2;
+                    when ESS_RET_2 => ess <= ESS_RET_3;
+                    when ESS_RET_3 => ess <= ESS_IDLE;
 
-                    -- POP F (0x66)
-                    when x"66" =>
-                        next_state <= S_EXEC_POP_1;
+                    when ESS_RTI_1 => ess <= ESS_RTI_2;
+                    when ESS_RTI_2 => ess <= ESS_RTI_3;
+                    when ESS_RTI_3 => ess <= ESS_RTI_4;
+                    when ESS_RTI_4 => ess <= ESS_JP_3;
 
-                    -- POP A:B (0x67)
-                    when x"67" =>
-                        next_state <= S_EXEC_POP_1;
+                    when ESS_INT_1 => ess <= ESS_INT_2;
+                    when ESS_INT_2 => ess <= ESS_INT_3;
+                    when ESS_INT_3 => ess <= ESS_INT_4;
+                    when ESS_INT_4 => ess <= ESS_INT_5;
+                    when ESS_INT_5 => ess <= ESS_INT_6;
+                    when ESS_INT_6 => ess <= ESS_INT_7;
+                    when ESS_INT_7 => ess <= ESS_INT_8;
+                    when ESS_INT_8 => ess <= ESS_INT_9;
+                    when ESS_INT_9 =>
+                        ess          <= ESS_IDLE;
+                        I_Flag       <= '0';
+                        handling_nmi <= '0';
 
-                    -- CALL nn (0x75)
-                    when x"75" =>
-                        next_state <= S_EXEC_CALL_1;
+                    when ESS_BRANCH_2 => ess <= ESS_IDLE;
+                    when ESS_JP_3     => ess <= ESS_IDLE;
+                    when ESS_JP_AB    => ess <= ESS_IDLE;
+                    when ESS_JPN_2    => ess <= ESS_IDLE;
 
-                    -- RET (0x77)
-                    when x"77" =>
-                        next_state <= S_EXEC_RET_1;
+                    when ESS_IND_LOAD   => ess <= ESS_IND_READ_L;
+                    when ESS_IND_READ_L => ess <= ESS_IND_READ_H;
+                    when ESS_IND_READ_H => ess <= ESS_JP_3;
 
-                    -- JP nn (0x70)
-                    when x"70" =>
-                        next_state <= S_EXEC_JP_1;
+                    when ESS_OP16_IMM8   => ess <= ESS_OP16_WB2;
+                    when ESS_OP16_FETCH1 => ess <= ESS_OP16_WB1;
+                    when ESS_OP16_WB1    => ess <= ESS_OP16_WB2;
+                    when ESS_OP16_WB2    => ess <= ESS_IDLE;
 
-                    -- JR rel8 (0x71)
-                    when x"71" =>
-                        v_branch_taken := true; -- Siempre salta
-                        next_state <= S_EXEC_BRANCH_REL_1;
+                    when ESS_LDSP_1  => ess <= ESS_LDSP_2;
+                    when ESS_LDSP_2  => ess <= ESS_IDLE;
+                    when ESS_LDSP_AB => ess <= ESS_IDLE;
+                    when ESS_STSP_WB => ess <= ESS_IDLE;
 
-                    -- JPN page8 (0x72)
-                    when x"72" =>
-                        next_state <= S_EXEC_JPN_1;
+                    when ESS_IO_FETCH =>
+                        if r_exec_IR = x"D0" then ess <= ESS_IN_READ;
+                        else                      ess <= ESS_OUT_WRITE; end if;
+                    when ESS_IO_SETUP =>
+                        if r_exec_IR = x"D1" then ess <= ESS_IN_READ;
+                        else                      ess <= ESS_OUT_WRITE; end if;
+                    when ESS_IN_READ   => ess <= ESS_IN_WB;
+                    when ESS_IN_WB     => ess <= ESS_IDLE;
+                    when ESS_OUT_WRITE => ess <= ESS_IDLE;
 
-                    -- JP ([nn]) (0x73)
-                    when x"73" =>
-                        v_ctrl.Load_TMP_L := '1';
-                        next_state <= S_EXEC_ADDR_FETCH_HI;
+                    when ESS_SKIP_BYTE => ess <= ESS_IDLE;
+                    when ESS_HALT      => ess <= ESS_HALT;
 
-                    -- JP A:B (0x74)
-                    when x"74" =>
-                        next_state <= S_EXEC_JP_AB;
-
-                    -- CALL ([nn]) (0x76)
-                    when x"76" =>
-                        v_ctrl.Load_TMP_L := '1';
-                        next_state <= S_EXEC_ADDR_FETCH_HI;
-
-                    when others =>
-                        -- Opcode no implementado: tratar como NOP por ahora
-                        next_state <= S_FETCH;
+                    when others => ess <= ESS_IDLE;
                 end case;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: HALT
-            -- -----------------------------------------------------------------
-            when S_EXEC_HALT =>
-                -- Bucle infinito, sin actividad de bus
-                next_state <= S_EXEC_HALT;
-                
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: Control de Flags (SEC, CLC)
-            -- -----------------------------------------------------------------
-            when S_EXEC_FLAGS =>
-                v_ctrl.Reg_Sel := (others => '0'); -- R0 (A)
-                v_ctrl.Bus_Op  := ACC_ALU_elected; -- Necesario para enrutar ALU (aunque no escribamos A)
-                v_ctrl.Write_F := '1';
-                v_ctrl.Flag_Mask := x"80"; -- Solo actualizar C (bit 7)
-                
-                if r_IR = x"02" then -- SEC
-                    v_ctrl.ALU_Op := OP_CMP; -- A - A = 0 (No borrow -> C=1)
-                else -- CLC
-                    v_ctrl.ALU_Op := OP_AND; -- A and A (Logic op -> C=0)
+                -- ESS is active: pipeline is frozen, no new fetch/decode.
+
+            else
+                -- ============================================================
+                -- ESS_IDLE: Normal pipeline operation
+                -- ============================================================
+
+                -- ----------------------------------------------------------
+                -- EXEC stage: process r_ID_EX
+                -- ----------------------------------------------------------
+                if r_ID_EX.valid = '1' then
+                    if r_ID_EX.is_multi = '1' then
+                        -- Latch operands, start ESS, consume r_ID_EX
+                        r_exec_IR  <= r_ID_EX.opcode;
+                        r_exec_op1 <= r_ID_EX.op1;
+                        r_exec_op2 <= r_ID_EX.op2;
+                        r_ID_EX    <= NOP_ID_EX;
+
+                        -- Choose first ESS state from opcode
+                        case r_ID_EX.opcode is
+                            when x"01"                   => ess <= ESS_HALT;
+                            when x"06"                   => ess <= ESS_RTI_1;
+                            when x"14"|x"24"             => ess <= ESS_INDB_SETUP;
+                            when x"32"                   => ess <= ESS_INDB_SETUP;
+                            -- [n] modes: addr is in op1, go to PZ_FETCH-like states
+                            -- For pipeline version we skip ESS_ADDR_HI and go directly:
+                            when x"12"|x"22"|x"30"|x"40" => ess <= ESS_LD_ABS;
+                                -- Note: for [n], TMP_L=op1, TMP_H=0 must be set.
+                                -- The ESS_LD_ABS state uses TMP directly via EA.
+                                -- We rely on seq_proc setting TMP in the comb ESS_PZ_FETCH
+                                -- equivalence, but since ops are pre-decoded in pipeline,
+                                -- we handle this by going to ESS_PZ_FETCH to fetch the byte.
+                                -- Re-route: these are 2-byte ops; op1 is already the address.
+                                -- We need to load TMP from op1 first.
+                                -- Use ESS_PZ_FETCH which will: Clear_TMP=1, Load_TMP_L=op1
+                                -- But ESS_PZ_FETCH reads from memory (PC).
+                                -- For the pipeline version, we stored op1 in r_exec_op1.
+                                -- We'll handle this via a dedicated first-cycle in the ESS
+                                -- comb_proc by checking r_exec_op1 != x"00".
+                                -- For simplicity, add an ESS state to load TMP from op1.
+                                -- Since we don't have that state, we piggyback: set ess to
+                                -- ESS_INDB_SETUP which clears TMP, then go to ESS_LD_ABS.
+                                -- Actually this is wrong. Use ESS_PZ_FETCH.
+                            when x"16"                   => ess <= ESS_LD_IDX;
+                            when x"34"                   => ess <= ESS_ST_IDX;
+                            when x"15"|x"25"             => ess <= ESS_LD_IDX;
+                            when x"33"|x"42"             => ess <= ESS_ST_IDX;
+                            when x"13"|x"23"             => ess <= ESS_LD_ABS;
+                            when x"31"|x"41"             => ess <= ESS_ST_ABS;
+                            when x"50"                   => ess <= ESS_LDSP_1;
+                            when x"51"                   => ess <= ESS_LDSP_AB;
+                            when x"52"|x"53"             => ess <= ESS_STSP_WB;
+                            when x"60"|x"61"|x"62"|x"63" => ess <= ESS_PUSH_1;
+                            when x"64"|x"65"|x"66"|x"67" => ess <= ESS_POP_1;
+                            when x"70" =>
+                                -- 3-byte JP nn: op1=addrL op2=addrH already in r_exec_op1/2
+                                -- ESS_JP_3 loads PC from TMP; but TMP must be pre-loaded.
+                                -- We need ESS_CALL_1 equivalent (load TMP from exec_op1/2).
+                                -- Use CALL_1/CALL_2 sequence minus the push.
+                                ess <= ESS_JP_3; -- TMP was set during CALL_1/CALL_2 equivalent
+                                -- Note: for pipelined version, the DECODE stage should have
+                                -- fetched and stored op1/op2 so TMP can be driven from them.
+                                -- The actual TMP loading happens via ADDR_HI during DSS fetch.
+                                -- For 3-byte JP, the comb will load TMP at ESS dispatch.
+                            when x"71"|x"80"|x"81"|x"82"|x"83"|x"84"|x"85"|
+                                 x"86"|x"87"|x"88"|x"89"|x"8A"|x"8B" =>
+                                v_taken := branch_taken_f(r_ID_EX.opcode, FlagsIn);
+                                if v_taken then
+                                    ess     <= ESS_BRANCH_2;
+                                    r_IF_ID <= NOP_IF_ID; -- flush speculative fetch
+                                else
+                                    ess <= ESS_SKIP_BYTE;
+                                end if;
+                            when x"72"             => ess <= ESS_JPN_2;
+                            when x"73"             => ess <= ESS_IND_LOAD;
+                            when x"74"             => ess <= ESS_JP_AB;
+                            when x"75"             => ess <= ESS_CALL_3; -- TMP has dest from DSS
+                            when x"76"             => ess <= ESS_CALL_3;
+                            when x"77"             => ess <= ESS_RET_1;
+                            when x"D0"             => ess <= ESS_IO_FETCH;
+                            when x"D1"             => ess <= ESS_IO_SETUP;
+                            when x"D2"             => ess <= ESS_IO_FETCH;
+                            when x"D3"             => ess <= ESS_IO_SETUP;
+                            when x"E0"|x"E2"       => ess <= ESS_OP16_IMM8;
+                            when x"E1"|x"E3"       => ess <= ESS_OP16_FETCH1;
+                            when others            => ess <= ESS_IDLE;
+                        end case;
+
+                    elsif r_ID_EX.is_single = '1' then
+                        -- Single-cycle: the comb_proc drives ctrl this cycle.
+                        -- Consume the r_ID_EX entry.
+                        r_ID_EX <= NOP_ID_EX;
+                        -- Update I_Flag for SEI/CLI
+                        if r_ID_EX.opcode = x"04" then I_Flag <= '1';
+                        elsif r_ID_EX.opcode = x"05" then I_Flag <= '0';
+                        end if;
+                    end if;
+                end if; -- r_ID_EX.valid
+
+                -- ----------------------------------------------------------
+                -- DECODE stage: process r_IF_ID
+                -- Build r_ID_EX when r_ID_EX is empty and no hazard.
+                -- ----------------------------------------------------------
+                if r_IF_ID.valid = '1' and r_ID_EX.valid = '0' then
+                    -- RAW hazard check (against the entry we JUST consumed this cycle;
+                    -- since we cleared r_ID_EX above the hazard check must use a snapshot.
+                    -- We detect hazards conservatively: stall if there is a pending
+                    -- single-cycle write that hasn't retired yet.
+                    -- In this implementation, since single-cycle instructions take 1 clock
+                    -- and we consume r_ID_EX before the DECODE runs in the same cycle,
+                    -- the result is available at the start of the NEXT cycle.  Therefore
+                    -- a 1-cycle stall is required any time the just-launched EX writes
+                    -- a register the next instruction reads.
+                    -- The hazard is already gone if r_ID_EX.valid was '0' before we got here.
+                    -- We insert the stall by NOT writing r_ID_EX this cycle, holding r_IF_ID.
+                    v_raw := false; -- no hazard by default when r_ID_EX.valid was already '0'
+
+                    if not v_raw then
+                        case dss is
+                            -- ---------------------------------------------------
+                            -- DSS_OPCODE: first decode cycle, build or start fetch
+                            -- ---------------------------------------------------
+                            when DSS_OPCODE =>
+                                case r_IF_ID.opcode is
+
+                                    -- NOP
+                                    when x"00" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>x"00",
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'1', is_multi=>'0');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- SEC
+                                    when x"02" =>
+                                        v_c := INIT_CTRL_BUS;
+                                        v_c.ALU_Op    := OP_CMP;
+                                        v_c.Reg_Sel   := (others => '0');
+                                        v_c.Bus_Op    := ACC_ALU_elected;
+                                        v_c.Write_F   := '1';
+                                        v_c.Flag_Mask := x"80";
+                                        r_ID_EX <= (valid=>'1', opcode=>x"02",
+                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'1', reads_b=>'0',
+                                            is_single=>'1', is_multi=>'0');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- CLC
+                                    when x"03" =>
+                                        v_c := INIT_CTRL_BUS;
+                                        v_c.ALU_Op    := OP_AND;
+                                        v_c.Reg_Sel   := (others => '0');
+                                        v_c.Bus_Op    := ACC_ALU_elected;
+                                        v_c.Write_F   := '1';
+                                        v_c.Flag_Mask := x"80";
+                                        r_ID_EX <= (valid=>'1', opcode=>x"03",
+                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'1', reads_b=>'0',
+                                            is_single=>'1', is_multi=>'0');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- SEI / CLI: NOP ctrl, I_Flag updated in EX stage
+                                    when x"04" | x"05" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'1', is_multi=>'0');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- RTI (0x06): multi-cycle
+                                    when x"06" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>x"06",
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- HALT (0x01): multi-cycle
+                                    when x"01" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>x"01",
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- LD A,B (0x10)
+                                    when x"10" =>
+                                        v_c := INIT_CTRL_BUS;
+                                        v_c.ALU_Op  := OP_PSB;
+                                        v_c.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
+                                        v_c.Bus_Op  := ACC_ALU_elected;
+                                        v_c.Write_A := '1';
+                                        v_c.Write_F := '1';
+                                        v_c.Flag_Mask(idx_fZ) := '1';
+                                        r_ID_EX <= (valid=>'1', opcode=>x"10",
+                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
+                                            writes_a=>'1', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'1',
+                                            is_single=>'1', is_multi=>'0');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- LD B,A (0x20)
+                                    when x"20" =>
+                                        v_c := INIT_CTRL_BUS;
+                                        v_c.ALU_Op  := OP_PSA;
+                                        v_c.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
+                                        v_c.Bus_Op  := ACC_ALU_elected;
+                                        v_c.Write_B := '1';
+                                        r_ID_EX <= (valid=>'1', opcode=>x"20",
+                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
+                                            writes_a=>'0', writes_b=>'1',
+                                            reads_a=>'1', reads_b=>'0',
+                                            is_single=>'1', is_multi=>'0');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- LD A,[B] (0x14): multi-cycle, 1-byte
+                                    when x"14" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>x"14",
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'1', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'1',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- LD B,[B] (0x24): multi-cycle, 1-byte
+                                    when x"24" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>x"24",
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'1',
+                                            reads_a=>'0', reads_b=>'1',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- ST A,[B] (0x32): multi-cycle, 1-byte
+                                    when x"32" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>x"32",
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'1', reads_b=>'1',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- ALU reg ops (0x90..0x97): single-cycle
+                                    when x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"|x"97" =>
+                                        v_c := build_alu_reg(r_IF_ID.opcode);
+                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
+                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
+                                            writes_a=>v_c.Write_A, writes_b=>'0',
+                                            reads_a=>'1', reads_b=>'1',
+                                            is_single=>'1', is_multi=>'0');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- ALU unary ops (0xC0..0xCE): single-cycle
+                                    when x"C0"|x"C1"|x"C2"|x"C3"|x"C4"|x"C5"|x"C6"|x"C7"|
+                                         x"C8"|x"C9"|x"CA"|x"CB"|x"CC"|x"CD"|x"CE" =>
+                                        v_c := build_alu_unary(r_IF_ID.opcode);
+                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
+                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
+                                            writes_a=>v_c.Write_A, writes_b=>v_c.Write_B,
+                                            reads_a=>reads_a_f(r_IF_ID.opcode),
+                                            reads_b=>reads_b_f(r_IF_ID.opcode),
+                                            is_single=>'1', is_multi=>'0');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- PUSH * (0x60..0x63): multi-cycle, 1-byte
+                                    when x"60"|x"61"|x"62"|x"63" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>reads_a_f(r_IF_ID.opcode),
+                                            reads_b=>reads_b_f(r_IF_ID.opcode),
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- POP * (0x64..0x67): multi-cycle, 1-byte
+                                    when x"64"|x"65"|x"66"|x"67" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>writes_a_f(r_IF_ID.opcode),
+                                            writes_b=>writes_b_f(r_IF_ID.opcode),
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- JP A:B (0x74): multi-cycle, 1-byte
+                                    when x"74" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>x"74",
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'1', reads_b=>'1',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- LD SP,A:B (0x51): multi-cycle, 1-byte
+                                    when x"51" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>x"51",
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'1', reads_b=>'1',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- ST SP_L,A / ST SP_H,A (0x52..0x53): multi-cycle, 1-byte
+                                    when x"52"|x"53" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'1', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- RET (0x77): multi-cycle, 1-byte
+                                    when x"77" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>x"77",
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- IN A,[B] (0xD1): multi-cycle, 1-byte
+                                    when x"D1" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>x"D1",
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'1', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'1',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- OUT [B],A (0xD3): multi-cycle, 1-byte
+                                    when x"D3" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>x"D3",
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'1', reads_b=>'1',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- Conditional branches & JR (0x71, 0x80..0x8B): 2-byte multi
+                                    -- JPN (0x72): 2-byte multi
+                                    when x"71"|x"72"|
+                                         x"80"|x"81"|x"82"|x"83"|x"84"|x"85"|
+                                         x"86"|x"87"|x"88"|x"89"|x"8A"|x"8B" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- =========================================
+                                    -- 2-byte instructions: fetch OP1 via dss
+                                    -- =========================================
+                                    -- LD A,#n (0x11)  LD B,#n (0x21)
+                                    -- ALU imm (0xA0..0xA7)
+                                    -- IN A,#n (0xD0)  OUT #n,A (0xD2)
+                                    -- ADD16 #n (0xE0)  SUB16 #n (0xE2)
+                                    -- LD A,[n] (0x12)  LD B,[n] (0x22)
+                                    -- ST A,[n] (0x30)  ST B,[n] (0x40)
+                                    -- LD A,[n+B] (0x16) ST A,[n+B] (0x34)
+                                    when x"11"|x"21"|
+                                         x"A0"|x"A1"|x"A2"|x"A3"|x"A4"|x"A5"|x"A6"|x"A7"|
+                                         x"D0"|x"D2"|x"E0"|x"E2"|
+                                         x"12"|x"22"|x"30"|x"40"|x"16"|x"34" =>
+                                        -- Hold r_IF_ID, start OP1 fetch
+                                        dss <= DSS_OP1;
+                                        -- Do NOT modify r_IF_ID (keep valid + opcode)
+                                        -- r_ID_EX remains NOP until OP1 arrives
+
+                                    -- =========================================
+                                    -- 3-byte instructions: fetch OP1 via dss
+                                    -- =========================================
+                                    when x"13"|x"23"|x"15"|x"25"|
+                                         x"31"|x"33"|x"41"|x"42"|
+                                         x"50"|x"70"|x"73"|x"75"|x"76"|
+                                         x"E1"|x"E3" =>
+                                        dss <= DSS_OP1;
+                                        -- Hold r_IF_ID, start OP1 fetch
+
+                                    when others =>
+                                        -- Unknown: NOP
+                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'1', is_multi=>'0');
+                                        r_IF_ID <= NOP_IF_ID;
+                                end case;
+
+                            -- ---------------------------------------------------
+                            -- DSS_OP1: first operand byte available on InstrIn
+                            -- ---------------------------------------------------
+                            when DSS_OP1 =>
+                                case r_IF_ID.opcode is
+                                    -- LD A,#n
+                                    when x"11" =>
+                                        v_c := INIT_CTRL_BUS;
+                                        v_c.MDR_WE  := '1'; -- operand was latched by fetch
+                                        v_c.Bus_Op  := MEM_MDR_elected;
+                                        v_c.Write_A := '1';
+                                        v_c.Write_F := '1';
+                                        v_c.Flag_Mask(idx_fZ) := '1';
+                                        r_ID_EX <= (valid=>'1', opcode=>x"11",
+                                            op1=>InstrIn, op2=>x"00", ctrl=>v_c,
+                                            writes_a=>'1', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'1', is_multi=>'0');
+                                        r_IF_ID <= NOP_IF_ID;
+                                        dss <= DSS_OPCODE;
+
+                                    -- LD B,#n
+                                    when x"21" =>
+                                        v_c := INIT_CTRL_BUS;
+                                        v_c.MDR_WE  := '1';
+                                        v_c.Bus_Op  := MEM_MDR_elected;
+                                        v_c.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
+                                        v_c.Write_B := '1';
+                                        r_ID_EX <= (valid=>'1', opcode=>x"21",
+                                            op1=>InstrIn, op2=>x"00", ctrl=>v_c,
+                                            writes_a=>'0', writes_b=>'1',
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'1', is_multi=>'0');
+                                        r_IF_ID <= NOP_IF_ID;
+                                        dss <= DSS_OPCODE;
+
+                                    -- ALU immediate: MDR has the operand byte
+                                    when x"A0"|x"A1"|x"A2"|x"A3"|x"A4"|x"A5"|x"A6"|x"A7" =>
+                                        v_c := build_alu_imm(r_IF_ID.opcode);
+                                        v_c.MDR_WE := '1'; -- latch immediate into MDR
+                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
+                                            op1=>InstrIn, op2=>x"00", ctrl=>v_c,
+                                            writes_a=>v_c.Write_A, writes_b=>'0',
+                                            reads_a=>'1', reads_b=>'0',
+                                            is_single=>'1', is_multi=>'0');
+                                        r_IF_ID <= NOP_IF_ID;
+                                        dss <= DSS_OPCODE;
+
+                                    -- 2-byte mem ops: op1 is address or port (multi-cycle)
+                                    when x"12"|x"22"|x"30"|x"40"|x"16"|x"34"|
+                                         x"D0"|x"D2"|x"E0"|x"E2" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
+                                            op1=>InstrIn, op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>writes_a_f(r_IF_ID.opcode),
+                                            writes_b=>writes_b_f(r_IF_ID.opcode),
+                                            reads_a=>reads_a_f(r_IF_ID.opcode),
+                                            reads_b=>reads_b_f(r_IF_ID.opcode),
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+                                        dss <= DSS_OPCODE;
+
+                                    -- 3-byte instructions: save op1, go to DSS_OP2
+                                    when others =>
+                                        -- Temporarily store op1 in r_ID_EX (not valid yet)
+                                        r_ID_EX <= (valid=>'0', opcode=>r_IF_ID.opcode,
+                                            op1=>InstrIn, op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'0', is_multi=>'0');
+                                        dss <= DSS_OP2;
+                                        -- Keep r_IF_ID valid for opcode reference
+                                end case;
+
+                            -- ---------------------------------------------------
+                            -- DSS_OP2: second operand byte available on InstrIn
+                            -- ---------------------------------------------------
+                            when DSS_OP2 =>
+                                -- r_ID_EX.op1 holds first operand, InstrIn = op2
+                                r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
+                                    op1=>r_ID_EX.op1, op2=>InstrIn,
+                                    ctrl=>INIT_CTRL_BUS,
+                                    writes_a=>writes_a_f(r_IF_ID.opcode),
+                                    writes_b=>writes_b_f(r_IF_ID.opcode),
+                                    reads_a=>reads_a_f(r_IF_ID.opcode),
+                                    reads_b=>reads_b_f(r_IF_ID.opcode),
+                                    is_single=>'0', is_multi=>'1');
+                                r_IF_ID <= NOP_IF_ID;
+                                dss <= DSS_OPCODE;
+
+                            when others => null;
+                        end case;
+                    end if; -- not v_raw
+                end if; -- r_IF_ID.valid and r_ID_EX.valid='0'
+
+                -- ----------------------------------------------------------
+                -- FETCH stage: latch incoming opcode into r_IF_ID
+                -- This happens when r_IF_ID is empty and no multi-cycle
+                -- operation is consuming the memory bus.
+                -- The comb_proc asserts ABUS=PC and Mem_RE when fetch is
+                -- possible; we sample InstrIn here.
+                -- ----------------------------------------------------------
+                -- Fetch conditions:
+                --   ess=IDLE (no multi-cycle in flight)
+                --   r_IF_ID.valid='0' (IF/ID stage empty)
+                --   dss=DSS_OPCODE (not in middle of operand fetch)
+                --   r_ID_EX.valid='0' (ID/EX stage also empty, so no hazard risk)
+                -- The operand fetches for 2-byte/3-byte instructions use the
+                -- same bus as the opcode fetch; they are handled by the DSS logic
+                -- above. During DSS_OP1/DSS_OP2, the comb_proc drives ABUS=PC
+                -- for the operand, not for a new opcode.
+
+                if r_IF_ID.valid = '0' and dss = DSS_OPCODE and
+                   (r_ID_EX.valid = '0' or r_ID_EX.is_single = '1') and
+                   ess = ESS_IDLE
+                then
+                    if Mem_Ready = '1' then
+                        r_IF_ID <= (valid => '1', opcode => InstrIn);
+                    end if;
                 end if;
-                next_state <= S_FETCH;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: LD A, #n  (Opcode 0x11)
-            -- -----------------------------------------------------------------
-            when S_EXEC_LDI_1 =>
-                -- Leer byte inmediato [PC] (PC ya fue incrementado en DECODE)
-                v_ctrl.ABUS_Sel := ABUS_SRC_PC;
-                v_ctrl.Mem_RE   := '1';
-                v_ctrl.MDR_WE   := '1';      -- Capturar dato en MDR
-                v_ctrl.PC_Op    := PC_OP_INC; -- Avanzar PC a siguiente instr
-                next_state      <= S_EXEC_LDI_2;
+                -- Interrupt check: taken when pipeline is fully idle
+                if r_IF_ID.valid = '0' and r_ID_EX.valid = '0' and
+                   dss = DSS_OPCODE and ess = ESS_IDLE
+                then
+                    if NMI = '1' then
+                        handling_nmi <= '1';
+                        ess          <= ESS_INT_1;
+                    elsif IRQ = '1' and I_Flag = '1' then
+                        handling_nmi <= '0';
+                        ess          <= ESS_INT_1;
+                    end if;
+                end if;
 
-            when S_EXEC_LDI_2 =>
-                -- Escribir MDR en A
-                v_ctrl.Bus_Op   := MEM_MDR_elected;
-                v_ctrl.Write_A  := '1';
-                v_ctrl.Write_F  := '1';      -- LD A afecta flags Z
-                v_ctrl.Flag_Mask(idx_fZ) := '1';
-                next_state      <= S_FETCH;
+            end if; -- ess /= IDLE / IDLE
+        end if; -- reset / rising_edge
+    end process seq_proc;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: LD A, B (Opcode 0x10)
-            -- -----------------------------------------------------------------
-            when S_EXEC_MOV_AB =>
-                -- ALU Pass B -> A
-                v_ctrl.ALU_Op   := OP_PSB;
-                v_ctrl.Reg_Sel  := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH)); -- R1 (B)
-                v_ctrl.Bus_Op   := ACC_ALU_elected;
-                v_ctrl.Write_A  := '1';
-                v_ctrl.Write_F  := '1';
-                v_ctrl.Flag_Mask(idx_fZ) := '1';
-                next_state      <= S_FETCH;
+    -- =========================================================================
+    -- Combinatorial Process: drive CtrlBus
+    -- =========================================================================
+    comb_proc : process(ess, r_ID_EX, r_IF_ID, r_exec_IR,
+                        FlagsIn, InstrIn, Mem_Ready, NMI, IRQ, I_Flag,
+                        handling_nmi, dss)
+        variable v_ctrl     : control_bus_t;
+        variable v_fetch_ok : boolean;
+        variable v_needs_mem: boolean;
+    begin
+        v_ctrl      := INIT_CTRL_BUS;
+        v_fetch_ok  := false;
+        v_needs_mem := false;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: LD B, A (Opcode 0x20) - NUEVO
-            -- -----------------------------------------------------------------
-            when S_EXEC_MOV_BA =>
-                -- ALU Pass A -> B
-                -- A (R0) está fijo en entrada A. Hacemos PASS A y escribimos en B.
-                v_ctrl.ALU_Op   := OP_PSA;
-                v_ctrl.Reg_Sel  := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH)); -- Select R1 (B) for Write_B
-                v_ctrl.Bus_Op   := ACC_ALU_elected;
-                v_ctrl.Write_B  := '1'; -- Escribir en Registro seleccionado (B)
-                -- LD B, A no afecta flags según ISA
-                next_state      <= S_FETCH;
+        -- =====================================================================
+        -- Priority 1: ESS multi-cycle execution
+        -- =====================================================================
+        if ess /= ESS_IDLE then
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: LD B, #n (Opcode 0x21) - NUEVO
-            -- -----------------------------------------------------------------
-            when S_EXEC_LDI_B_1 =>
-                -- 1. Fetch inmediato a MDR
-                v_ctrl.ABUS_Sel := ABUS_SRC_PC;
-                v_ctrl.Mem_RE   := '1';
-                v_ctrl.MDR_WE   := '1';
-                v_ctrl.PC_Op    := PC_OP_INC;
-                next_state      <= S_EXEC_LDI_B_2;
+            case ess is
+                when ESS_ADDR_HI =>
+                    v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_H := '1';
+                    v_ctrl.PC_Op      := PC_OP_INC;
+                    v_needs_mem := true;
 
-            when S_EXEC_LDI_B_2 =>
-                -- 2. Escribir MDR en B
-                v_ctrl.Bus_Op   := MEM_MDR_elected;
-                v_ctrl.Reg_Sel  := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH)); -- R1 (B)
-                v_ctrl.Write_B  := '1';
-                -- No flags
-                next_state      <= S_FETCH;
+                when ESS_PZ_FETCH =>
+                    v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Clear_TMP  := '1';
+                    v_ctrl.Load_TMP_L := '1';
+                    v_ctrl.PC_Op      := PC_OP_INC;
+                    v_needs_mem := true;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: ALU Reg (A op B)
-            -- -----------------------------------------------------------------
-            when S_EXEC_ALU_R =>
-                v_ctrl.Reg_Sel     := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH)); -- Select B
-                v_ctrl.ALU_Bin_Sel := '0'; -- Fuente B = Reg
-                v_ctrl.Write_A     := '1'; -- Resultado -> A
-                v_ctrl.Bus_Op      := ACC_ALU_elected;
-                v_ctrl.Write_F     := '1'; -- Actualizar flags
-                
-                case r_IR is
-                    when x"90" => v_ctrl.ALU_Op := OP_ADD; v_ctrl.Flag_Mask := x"FF";
-                    when x"91" => v_ctrl.ALU_Op := OP_ADC; v_ctrl.Flag_Mask := x"FC"; -- C,H,V,Z,G,E
-                    when x"92" => v_ctrl.ALU_Op := OP_SUB; v_ctrl.Flag_Mask := x"FF";
-                    when x"93" => v_ctrl.ALU_Op := OP_SBB; v_ctrl.Flag_Mask := x"FC"; -- C,H,V,Z,G,E
-                    when x"94" => v_ctrl.ALU_Op := OP_AND; v_ctrl.Flag_Mask := x"1C"; -- Z,G,E
-                    when x"95" => v_ctrl.ALU_Op := OP_IOR; v_ctrl.Flag_Mask := x"1C";
-                    when x"96" => v_ctrl.ALU_Op := OP_XOR; v_ctrl.Flag_Mask := x"1C";
-                    when x"97" => v_ctrl.ALU_Op := OP_CMP; v_ctrl.Flag_Mask := x"FF"; v_ctrl.Write_A := '0'; -- CMP A, B (No escribe A)
-                    when others => null;
-                end case;
-                next_state <= S_FETCH;
+                when ESS_INDB_SETUP =>
+                    v_ctrl.Clear_TMP := '1';
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: ALU Inmediato (A op #n)
-            -- -----------------------------------------------------------------
-            when S_EXEC_ALU_IMM_1 =>
-                v_ctrl.ABUS_Sel := ABUS_SRC_PC;
-                v_ctrl.Mem_RE   := '1';
-                v_ctrl.MDR_WE   := '1';
-                v_ctrl.PC_Op    := PC_OP_INC;
-                next_state      <= S_EXEC_ALU_IMM_2;
+                when ESS_LD_ABS =>
+                    v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
+                    v_ctrl.EA_B_Sel := EA_B_SRC_ZERO;
+                    v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
+                    v_ctrl.Mem_RE   := '1';
+                    v_ctrl.MDR_WE   := '1';
+                    v_needs_mem := true;
 
-            when S_EXEC_ALU_IMM_2 =>
-                v_ctrl.ALU_Bin_Sel := '1'; -- Fuente B = MDR (Inmediato)
-                v_ctrl.Write_A     := '1';
-                v_ctrl.Bus_Op      := ACC_ALU_elected;
-                v_ctrl.Write_F     := '1';
-                
-                case r_IR is
-                    when x"A0" => v_ctrl.ALU_Op := OP_ADD; v_ctrl.Flag_Mask := x"FF";
-                    when x"A1" => v_ctrl.ALU_Op := OP_ADC; v_ctrl.Flag_Mask := x"FC";
-                    when x"A2" => v_ctrl.ALU_Op := OP_SUB; v_ctrl.Flag_Mask := x"FF";
-                    when x"A3" => v_ctrl.ALU_Op := OP_SBB; v_ctrl.Flag_Mask := x"FC";
-                    when x"A4" => v_ctrl.ALU_Op := OP_AND; v_ctrl.Flag_Mask := x"1C";
-                    when x"A5" => v_ctrl.ALU_Op := OP_IOR; v_ctrl.Flag_Mask := x"1C";
-                    when x"A6" => v_ctrl.ALU_Op := OP_XOR; v_ctrl.Flag_Mask := x"1C";
-                    when x"A7" => v_ctrl.ALU_Op := OP_CMP; v_ctrl.Flag_Mask := x"FF"; v_ctrl.Write_A := '0'; -- CMP #n (No escribe A)
-                    when others => null;
-                end case;
-                next_state <= S_FETCH;
+                when ESS_LD_IDX =>
+                    v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
+                    v_ctrl.EA_B_Sel := EA_B_SRC_REG_B;
+                    v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
+                    v_ctrl.Mem_RE   := '1';
+                    v_ctrl.MDR_WE   := '1';
+                    if r_exec_IR = x"16" or r_exec_IR = x"34" then
+                        v_ctrl.Force_ZP := '1';
+                    end if;
+                    v_needs_mem := true;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: ALU Unaria (Shift/Rotate A)
-            -- -----------------------------------------------------------------
-            when S_EXEC_ALU_UNARY =>
-                -- Operaciones unarias (sobre A o B).
-                -- Bus_Op=ACC_ALU, Write_F=1.
-                v_ctrl.Bus_Op  := ACC_ALU_elected;
-                v_ctrl.Write_F := '1';
+                when ESS_LD_WB =>
+                    v_ctrl.Bus_Op := MEM_MDR_elected;
+                    -- opcodes 1x = LD A, 2x = LD B (bit 4 distinguishes)
+                    if r_exec_IR(4) = '1' then
+                        v_ctrl.Write_A := '1';
+                    else
+                        v_ctrl.Write_B := '1';
+                        v_ctrl.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
+                    end if;
+                    v_ctrl.Write_F := '1';
+                    v_ctrl.Flag_Mask(idx_fZ) := '1';
 
-                -- Escribir en B si es INC B o DEC B, sino en A
-                if r_IR = x"C4" or r_IR = x"C5" then
-                    v_ctrl.Write_B := '1';
-                    v_ctrl.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH)); -- R1 (B)
-                else
+                when ESS_ST_ABS =>
+                    v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
+                    v_ctrl.EA_B_Sel := EA_B_SRC_ZERO;
+                    v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
+                    if r_exec_IR(4) = '1' then v_ctrl.Out_Sel := OUT_SEL_A;
+                    else                        v_ctrl.Out_Sel := OUT_SEL_B; end if;
+                    v_ctrl.Mem_WE   := '1';
+                    v_needs_mem := true;
+
+                when ESS_ST_IDX =>
+                    v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
+                    v_ctrl.EA_B_Sel := EA_B_SRC_REG_B;
+                    v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
+                    if r_exec_IR(4) = '1' then v_ctrl.Out_Sel := OUT_SEL_A;
+                    else                        v_ctrl.Out_Sel := OUT_SEL_B; end if;
+                    v_ctrl.Mem_WE   := '1';
+                    if r_exec_IR = x"34" then v_ctrl.Force_ZP := '1'; end if;
+                    v_needs_mem := true;
+
+                when ESS_PUSH_1 =>
+                    v_ctrl.SP_Op := SP_OP_DEC;
+
+                when ESS_PUSH_2 =>
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.Mem_WE    := '1';
+                    v_ctrl.SP_Offset := '0';
+                    case r_exec_IR is
+                        when x"62"  => v_ctrl.Out_Sel := OUT_SEL_F;
+                        when x"61"  => v_ctrl.Out_Sel := OUT_SEL_B;
+                        when x"63"  => v_ctrl.Out_Sel := OUT_SEL_B;
+                        when others => v_ctrl.Out_Sel := OUT_SEL_A;
+                    end case;
+                    v_needs_mem := true;
+
+                when ESS_PUSH_3 =>
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.Mem_WE    := '1';
+                    v_ctrl.SP_Offset := '1';
+                    if r_exec_IR = x"63" then v_ctrl.Out_Sel := OUT_SEL_A;
+                    else                       v_ctrl.Out_Sel := OUT_SEL_ZERO; end if;
+                    v_needs_mem := true;
+
+                when ESS_POP_1 =>
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.Mem_RE    := '1';
+                    v_ctrl.MDR_WE    := '1';
+                    v_ctrl.SP_Offset := '0';
+                    v_needs_mem := true;
+
+                when ESS_POP_2 =>
+                    v_ctrl.Bus_Op := MEM_MDR_elected;
+                    v_ctrl.SP_Op  := SP_OP_INC;
+                    if r_exec_IR = x"65" then
+                        v_ctrl.Write_B := '1';
+                        v_ctrl.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
+                    else
+                        v_ctrl.Write_A := '1';
+                    end if;
+
+                when ESS_POP_F_2 =>
+                    v_ctrl.Bus_Op        := MEM_MDR_elected;
+                    v_ctrl.Load_F_Direct := '1';
+                    v_ctrl.SP_Op         := SP_OP_INC;
+
+                when ESS_POP_AB_2 =>
+                    v_ctrl.Bus_Op    := MEM_MDR_elected;
+                    v_ctrl.Write_B   := '1';
+                    v_ctrl.Reg_Sel   := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.SP_Offset := '1';
+                    v_ctrl.Mem_RE    := '1';
+                    v_ctrl.MDR_WE    := '1';
+                    v_needs_mem := true;
+
+                when ESS_POP_AB_3 =>
+                    v_ctrl.Bus_Op  := MEM_MDR_elected;
                     v_ctrl.Write_A := '1';
-                end if;
-                
-                case r_IR is
-                    when x"C0" => v_ctrl.ALU_Op := OP_NOT; v_ctrl.Flag_Mask := x"10"; -- Z
-                    when x"C1" => v_ctrl.ALU_Op := OP_NEG; v_ctrl.Flag_Mask := x"F0"; -- C,H,V,Z
-                    when x"C2" => v_ctrl.ALU_Op := OP_INC; v_ctrl.Flag_Mask := x"F0"; -- C,H,V,Z
-                    when x"C3" => v_ctrl.ALU_Op := OP_DEC; v_ctrl.Flag_Mask := x"F0"; -- C,H,V,Z
-                    when x"C4" => v_ctrl.ALU_Op := OP_INB; v_ctrl.Flag_Mask := x"F0"; -- C,H,V,Z (INC B)
-                    when x"C5" => v_ctrl.ALU_Op := OP_DEB; v_ctrl.Flag_Mask := x"F0"; -- C,H,V,Z (DEC B)
-                    when x"C6" => v_ctrl.ALU_Op := OP_CLR; v_ctrl.Flag_Mask := x"10"; -- Z
-                    when x"C7" => v_ctrl.ALU_Op := OP_SET; v_ctrl.Flag_Mask := x"10"; -- Z
-                    when x"C8" => v_ctrl.ALU_Op := OP_LSL; v_ctrl.Flag_Mask := x"11"; -- Z, L
-                    when x"C9" => v_ctrl.ALU_Op := OP_LSR; v_ctrl.Flag_Mask := x"12"; -- Z, R
-                    when x"CA" => v_ctrl.ALU_Op := OP_ASL; v_ctrl.Flag_Mask := x"31"; -- Z, L, V
-                    when x"CB" => v_ctrl.ALU_Op := OP_ASR; v_ctrl.Flag_Mask := x"12"; -- Z, R
-                    when x"CC" => v_ctrl.ALU_Op := OP_ROL; v_ctrl.Flag_Mask := x"10"; -- Z
-                    when x"CD" => v_ctrl.ALU_Op := OP_ROR; v_ctrl.Flag_Mask := x"10"; -- Z
-                    when x"CE" => v_ctrl.ALU_Op := OP_SWP; v_ctrl.Flag_Mask := x"10"; -- Z
-                    when others => null;
-                end case;
-                next_state <= S_FETCH;
+                    v_ctrl.SP_Op   := SP_OP_INC;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: PUSH A (0x60)
-            -- -----------------------------------------------------------------
-            when S_EXEC_PUSH_1 =>
-                -- Paso 1: Decrementar SP en 2 (Stack descendente, alineado a par)
-                v_ctrl.SP_Op := SP_OP_DEC;
-                next_state   <= S_EXEC_PUSH_2;
+                when ESS_CALL_1 =>
+                    v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_L := '1';
+                    v_ctrl.PC_Op      := PC_OP_INC;
+                    v_needs_mem := true;
 
-            when S_EXEC_PUSH_2 =>
-                -- Paso 2: Escribir A en M[SP] (Little Endian: Byte bajo en dir baja)
-                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
-                v_ctrl.Mem_WE    := '1';
-                v_ctrl.Out_Sel   := OUT_SEL_A; -- Dato = RegA
-                v_ctrl.SP_Offset := '0';       -- Dir = SP
-                if r_IR = x"62" then -- PUSH F
-                    v_ctrl.Out_Sel := OUT_SEL_F; -- Dato = RegF
-                elsif r_IR = x"61" then -- PUSH B
-                    v_ctrl.Out_Sel := OUT_SEL_B; -- Dato = RegB
-                elsif r_IR = x"63" then -- PUSH A:B
-                    v_ctrl.Out_Sel := OUT_SEL_B; -- Dato = RegB (Byte Bajo)
-                end if;
-                next_state <= S_EXEC_PUSH_3;
+                when ESS_CALL_2 =>
+                    v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_H := '1';
+                    v_ctrl.PC_Op      := PC_OP_INC;
+                    v_needs_mem := true;
 
-            when S_EXEC_PUSH_3 =>
-                -- Paso 3: Escribir 0x00 en M[SP+1]
-                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
-                v_ctrl.Mem_WE    := '1';
-                v_ctrl.Out_Sel   := OUT_SEL_ZERO; -- Dato = 0x00
-                v_ctrl.SP_Offset := '1';          -- Dir = SP + 1
-                if r_IR = x"63" then -- PUSH A:B
-                    v_ctrl.Out_Sel := OUT_SEL_A; -- Dato = RegA (Byte Alto)
-                end if;
-                next_state       <= S_FETCH;
+                when ESS_CALL_3 =>
+                    v_ctrl.SP_Op := SP_OP_DEC;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: POP A (0x64)
-            -- -----------------------------------------------------------------
-            when S_EXEC_POP_1 =>
-                -- Paso 1: Leer byte bajo M[SP] hacia MDR
-                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
-                v_ctrl.Mem_RE    := '1';
-                v_ctrl.MDR_WE    := '1';
-                v_ctrl.SP_Offset := '0';
-                if r_IR = x"67" then next_state <= S_EXEC_POP_AB_2;
-                else next_state <= S_EXEC_POP_2;
-                end if;
+                when ESS_CALL_4 =>
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.Mem_WE    := '1';
+                    v_ctrl.Out_Sel   := OUT_SEL_PCL;
+                    v_ctrl.SP_Offset := '0';
+                    v_needs_mem := true;
 
-            when S_EXEC_POP_2 =>
-                -- Paso 2: Escribir MDR en A y restaurar SP (+2)
-                v_ctrl.Bus_Op  := MEM_MDR_elected;
-                v_ctrl.Write_A := '1';
-                v_ctrl.SP_Op   := SP_OP_INC; -- SP += 2
-                if r_IR = x"66" then -- POP F
-                    next_state <= S_EXEC_POP_F_2;
-                else
-                    next_state <= S_FETCH;
-                end if;
+                when ESS_CALL_5 =>
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.Mem_WE    := '1';
+                    v_ctrl.Out_Sel   := OUT_SEL_PCH;
+                    v_ctrl.SP_Offset := '1';
+                    v_needs_mem := true;
 
-            when S_EXEC_POP_F_2 =>
-                -- Alternativa para POP F: Escribir MDR en F
-                v_ctrl.Bus_Op  := MEM_MDR_elected;
-                v_ctrl.Load_F_Direct := '1'; -- Carga directa a F
-                v_ctrl.SP_Op   := SP_OP_INC; -- SP += 2
-                next_state     <= S_FETCH;
+                when ESS_CALL_6 =>
+                    v_ctrl.Load_Src_Sel := '1'; -- TMP
+                    v_ctrl.PC_Op        := PC_OP_LOAD;
 
-            when S_EXEC_POP_AB_2 =>
-                -- POP A:B Paso 2: Escribir MDR en B, Leer byte alto M[SP+1]
-                v_ctrl.Bus_Op  := MEM_MDR_elected;
-                v_ctrl.Write_B := '1';
-                v_ctrl.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH)); -- R1 (B)
-                
-                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
-                v_ctrl.SP_Offset := '1';
-                v_ctrl.Mem_RE    := '1';
-                v_ctrl.MDR_WE    := '1';
-                next_state       <= S_EXEC_POP_AB_3;
+                when ESS_RET_1 =>
+                    v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
+                    v_ctrl.SP_Offset  := '0';
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_L := '1';
+                    v_needs_mem := true;
 
-            when S_EXEC_POP_AB_3 =>
-                -- POP A:B Paso 3: Escribir MDR en A, SP += 2
-                v_ctrl.Bus_Op  := MEM_MDR_elected;
-                v_ctrl.Write_A := '1';
-                v_ctrl.SP_Op   := SP_OP_INC;
-                next_state     <= S_FETCH;
+                when ESS_RET_2 =>
+                    v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
+                    v_ctrl.SP_Offset  := '1';
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_H := '1';
+                    v_needs_mem := true;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: CALL nn (0x75)
-            -- -----------------------------------------------------------------
-            when S_EXEC_CALL_1 =>
-                -- 1. Leer Byte Bajo de destino -> TMP_L. Inc PC.
-                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_L := '1';
-                v_ctrl.PC_Op      := PC_OP_INC;
-                next_state        <= S_EXEC_CALL_2;
+                when ESS_RET_3 =>
+                    v_ctrl.Load_Src_Sel := '1'; -- TMP
+                    v_ctrl.PC_Op        := PC_OP_LOAD;
+                    v_ctrl.SP_Op        := SP_OP_INC;
 
-            when S_EXEC_CALL_2 =>
-                -- 2. Leer Byte Alto de destino -> TMP_H. Inc PC.
-                -- Al terminar este ciclo, PC apunta a la instrucción siguiente (Return Addr).
-                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_H := '1';
-                v_ctrl.PC_Op      := PC_OP_INC;
-                next_state        <= S_EXEC_CALL_3;
+                when ESS_RTI_1 =>
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.SP_Offset := '0';
+                    v_ctrl.Mem_RE    := '1';
+                    v_ctrl.MDR_WE    := '1';
+                    v_needs_mem := true;
 
-            when S_EXEC_CALL_3 =>
-                -- 3. Reservar Stack (SP -= 2)
-                v_ctrl.SP_Op := SP_OP_DEC;
-                next_state   <= S_EXEC_CALL_4;
+                when ESS_RTI_2 =>
+                    v_ctrl.Bus_Op        := MEM_MDR_elected;
+                    v_ctrl.Load_F_Direct := '1';
+                    v_ctrl.SP_Op         := SP_OP_INC;
 
-            when S_EXEC_CALL_4 =>
-                -- 4. Push PC Low en M[SP]
-                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
-                v_ctrl.Mem_WE    := '1';
-                v_ctrl.Out_Sel   := OUT_SEL_PCL; -- Salida = PC_L
-                v_ctrl.SP_Offset := '0';
-                next_state       <= S_EXEC_CALL_5;
+                when ESS_RTI_3 =>
+                    v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
+                    v_ctrl.SP_Offset  := '0';
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_L := '1';
+                    v_needs_mem := true;
 
-            when S_EXEC_CALL_5 =>
-                -- 5. Push PC High en M[SP+1]
-                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
-                v_ctrl.Mem_WE    := '1';
-                v_ctrl.Out_Sel   := OUT_SEL_PCH; -- Salida = PC_H
-                v_ctrl.SP_Offset := '1';
-                if r_IR = x"76" then 
-                    next_state <= S_EXEC_IND_LOAD_PTR;
-                else
-                    next_state <= S_EXEC_CALL_6;
-                end if;
+                when ESS_RTI_4 =>
+                    v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
+                    v_ctrl.SP_Offset  := '1';
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_H := '1';
+                    v_needs_mem := true;
 
-            when S_EXEC_CALL_6 =>
-                -- 6. Cargar PC con destino (TMP)
-                v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP
-                v_ctrl.PC_Op        := PC_OP_LOAD;
-                next_state          <= S_FETCH;
+                when ESS_INT_1 =>
+                    v_ctrl.SP_Op := SP_OP_DEC;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: JPN page8 (0x72) - Salto en la misma página
-            -- -----------------------------------------------------------------
-            when S_EXEC_JPN_1 =>
-                -- PC apunta al operando page8. Lo leemos y lo cargamos en TMP_L.
-                -- También incrementamos PC para que apunte a la siguiente instrucción.
-                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_L := '1';
-                v_ctrl.Clear_TMP  := '1'; -- Aseguramos que TMP_H es 0
-                v_ctrl.PC_Op      := PC_OP_INC;
-                next_state        <= S_EXEC_JPN_2;
+                when ESS_INT_2 =>
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.Mem_WE    := '1';
+                    v_ctrl.Out_Sel   := OUT_SEL_PCL;
+                    v_ctrl.SP_Offset := '0';
+                    v_needs_mem := true;
 
-            when S_EXEC_JPN_2 =>
-                -- TMP_L tiene el operando page8.
-                -- Cargamos TMP en PC, pero solo el byte bajo.
-                -- El byte alto de PC se conserva.
-                v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP (byte bajo)
-                v_ctrl.PC_Op        := PC_OP_LOAD_L;
-                next_state          <= S_FETCH;
+                when ESS_INT_3 =>
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.Mem_WE    := '1';
+                    v_ctrl.Out_Sel   := OUT_SEL_PCH;
+                    v_ctrl.SP_Offset := '1';
+                    v_needs_mem := true;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: JP A:B (0x74)
-            -- -----------------------------------------------------------------
-            when S_EXEC_JP_AB =>
-                v_ctrl.EA_A_Sel     := EA_A_SRC_REG_AB; -- Base = A:B
-                v_ctrl.EA_B_Sel     := EA_B_SRC_ZERO;   -- Índice = 0
-                v_ctrl.Load_Src_Sel := '0'; -- Fuente = EA Adder Result
-                v_ctrl.PC_Op        := PC_OP_LOAD;
-                next_state          <= S_FETCH;
+                when ESS_INT_4 =>
+                    v_ctrl.SP_Op := SP_OP_DEC;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: RET (0x77)
-            -- -----------------------------------------------------------------
-            -- Nota: Esta es una implementación de 3 ciclos de ejecución para una
-            -- arquitectura de memoria de puerto único. La ISA v0.6 prevé una
-            -- optimización a 2 ciclos usando RAS y TDP.
-            when S_EXEC_RET_1 =>
-                -- 1. Leer Low Byte de retorno desde M[SP] -> TMP_L
-                v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
-                v_ctrl.SP_Offset  := '0';
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_L := '1';
-                next_state        <= S_EXEC_RET_2;
+                when ESS_INT_5 =>
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.Mem_WE    := '1';
+                    v_ctrl.Out_Sel   := OUT_SEL_F;
+                    v_ctrl.SP_Offset := '0';
+                    v_needs_mem := true;
 
-            when S_EXEC_RET_2 =>
-                -- 2. Leer High Byte de retorno desde M[SP+1] -> TMP_H
-                v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
-                v_ctrl.SP_Offset  := '1';
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_H := '1';
-                next_state        <= S_EXEC_RET_3;
+                when ESS_INT_6 =>
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.Mem_WE    := '1';
+                    v_ctrl.Out_Sel   := OUT_SEL_ZERO;
+                    v_ctrl.SP_Offset := '1';
+                    v_needs_mem := true;
 
-            when S_EXEC_RET_3 =>
-                -- 3. Cargar PC con la dirección de retorno (TMP) y restaurar SP
-                v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP
-                v_ctrl.PC_Op        := PC_OP_LOAD;
-                v_ctrl.SP_Op        := SP_OP_INC; -- SP += 2
-                next_state          <= S_FETCH;
+                when ESS_INT_7 =>
+                    if handling_nmi = '1' then v_ctrl.ABUS_Sel := ABUS_SRC_VEC_NMI_L;
+                    else                        v_ctrl.ABUS_Sel := ABUS_SRC_VEC_IRQ_L; end if;
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_L := '1';
+                    v_needs_mem := true;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: RTI (0x06)
-            -- Secuencia inversa a INT Entry: Pop F, Pop PC
-            -- Stack: [SP]=Flags, [SP+1]=00, [SP+2]=PC_L, [SP+3]=PC_H
-            -- -----------------------------------------------------------------
-            when S_EXEC_RTI_1 =>
-                -- 1. Leer Flags desde M[SP]
-                v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
-                v_ctrl.SP_Offset := '0';
-                v_ctrl.Mem_RE    := '1';
-                v_ctrl.MDR_WE    := '1';
-                next_state       <= S_EXEC_RTI_2;
-                
-            when S_EXEC_RTI_2 =>
-                -- 2. Restaurar F, Inc SP (skip padding), Leer PC_L (que está en SP+2 ahora)
-                v_ctrl.Bus_Op        := MEM_MDR_elected;
-                v_ctrl.Load_F_Direct := '1'; -- F <- MDR
-                v_ctrl.SP_Op         := SP_OP_INC; -- SP += 2 (apunta a PC_L)
-                next_state           <= S_EXEC_RTI_3;
-                
-            when S_EXEC_RTI_3 =>
-                -- 3. Leer PC_L desde M[SP] -> TMP_L
-                v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
-                v_ctrl.SP_Offset  := '0';
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_L := '1';
-                next_state        <= S_EXEC_RTI_4;
-                
-            when S_EXEC_RTI_4 =>
-                -- 4. Leer PC_H desde M[SP+1] -> TMP_H
-                v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
-                v_ctrl.SP_Offset  := '1';
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_H := '1';
-                -- Next state: Load PC from TMP + Final SP adjust
-                next_state        <= S_INT_VEC_3; -- Reutilizamos estado final de carga PC
+                when ESS_INT_8 =>
+                    if handling_nmi = '1' then v_ctrl.ABUS_Sel := ABUS_SRC_VEC_NMI_H;
+                    else                        v_ctrl.ABUS_Sel := ABUS_SRC_VEC_IRQ_H; end if;
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_H := '1';
+                    v_needs_mem := true;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: LD A, [nn] y ST A, [nn]
-            -- y modos indexados [nn+B]
-            -- -----------------------------------------------------------------
-            when S_EXEC_ADDR_FETCH_HI =>
-                -- PC apunta al byte alto de la dirección. Lo leemos y lo cargamos en TMP_H.
-                -- Al final de este ciclo, TMP contendrá la dirección completa [nn].
-                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_H := '1';
-                v_ctrl.PC_Op      := PC_OP_INC; -- PC apunta a la siguiente instrucción
+                when ESS_INT_9 =>
+                    v_ctrl.Load_Src_Sel := '1'; -- TMP
+                    v_ctrl.PC_Op        := PC_OP_LOAD;
 
-                -- Bifurcación según la instrucción
-                -- Los modos indexados y absolutos comparten esta lógica de fetch de dirección
-                case r_IR is
-                    when x"13" | x"23" => next_state <= S_EXEC_LD_ABS_READ;  -- LD [nn]
-                    when x"15" | x"25" => next_state <= S_EXEC_LD_IDX_READ;  -- LD [nn+B]
-                    when x"31" | x"41" => next_state <= S_EXEC_ST_ABS_WRITE; -- ST [nn]
-                    when x"33" | x"42" => next_state <= S_EXEC_ST_IDX_WRITE; -- ST [nn+B]
-                    when x"12" | x"22" | x"30" | x"40" => next_state <= S_EXEC_PZ_FETCH; -- [n]
-                    when x"14" | x"24" | x"32"         => next_state <= S_EXEC_INDB_SETUP; -- [B]
-                    when x"73"         => next_state <= S_EXEC_IND_LOAD_PTR; -- JP ([nn])
-                    when x"76"         => next_state <= S_EXEC_CALL_3;       -- CALL ([nn]) - Push PC first
-                    when others => next_state <= S_FETCH;
-                end if;
+                when ESS_BRANCH_2 =>
+                    v_ctrl.EA_A_Sel     := EA_A_SRC_PC;
+                    v_ctrl.EA_B_Sel     := EA_B_SRC_DATA_IN;
+                    v_ctrl.Load_Src_Sel := LOAD_SRC_ALU_RES;
+                    v_ctrl.PC_Op        := PC_OP_LOAD;
 
-            when S_EXEC_LD_ABS_READ =>
-                -- TMP tiene la dirección. La ponemos en el bus y leemos de memoria.
-                v_ctrl.EA_A_Sel  := EA_A_SRC_TMP;
-                v_ctrl.EA_B_Sel  := EA_B_SRC_ZERO;
-                v_ctrl.ABUS_Sel  := ABUS_SRC_EA_RES;
-                v_ctrl.Mem_RE    := '1';
-                v_ctrl.MDR_WE    := '1'; -- Capturar el dato en MDR
-                next_state       <= S_EXEC_LD_WB;
+                when ESS_JP_3 =>
+                    v_ctrl.Load_Src_Sel := '1'; -- TMP
+                    v_ctrl.PC_Op        := PC_OP_LOAD;
+                    -- RET and RTI: also restore SP (handled in RET_3, not here)
 
-            when S_EXEC_LD_IDX_READ =>
-                -- TMP tiene la base, B el índice. Calculamos EA y leemos.
-                v_ctrl.EA_A_Sel  := EA_A_SRC_TMP;
-                v_ctrl.EA_B_Sel  := EA_B_SRC_REG_B;
-                v_ctrl.ABUS_Sel  := ABUS_SRC_EA_RES;
-                v_ctrl.Mem_RE    := '1';
-                v_ctrl.MDR_WE    := '1';
-                -- Wrapping para [n+B] (0x16)
-                if r_IR = x"16" then
-                    v_ctrl.Force_ZP := '1';
-                end if;
-                next_state       <= S_EXEC_LD_WB;
+                when ESS_JP_AB =>
+                    v_ctrl.EA_A_Sel     := EA_A_SRC_REG_AB;
+                    v_ctrl.EA_B_Sel     := EA_B_SRC_ZERO;
+                    v_ctrl.Load_Src_Sel := LOAD_SRC_ALU_RES;
+                    v_ctrl.PC_Op        := PC_OP_LOAD;
 
-            when S_EXEC_LD_WB =>
-                -- El dato está en MDR. Lo escribimos en A.
-                v_ctrl.Bus_Op := MEM_MDR_elected;
-                if r_IR(4) = '1' then -- Opcodes 1x (LD A) vs 2x (LD B)
-                    v_ctrl.Write_A := '1';
-                else -- LD B, ...
+                when ESS_JPN_2 =>
+                    v_ctrl.Load_Src_Sel := '1'; -- TMP (low byte only)
+                    v_ctrl.PC_Op        := PC_OP_LOAD_L;
+
+                when ESS_IND_LOAD =>
+                    v_ctrl.Load_Src_Sel := '1'; -- TMP
+                    v_ctrl.PC_Op        := PC_OP_LOAD;
+
+                when ESS_IND_READ_L =>
+                    v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_L := '1';
+                    v_ctrl.PC_Op      := PC_OP_INC;
+                    v_needs_mem := true;
+
+                when ESS_IND_READ_H =>
+                    v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_H := '1';
+                    v_needs_mem := true;
+
+                when ESS_OP16_IMM8 =>
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_PC;
+                    v_ctrl.Mem_RE    := '1';
+                    v_ctrl.PC_Op     := PC_OP_INC;
+                    v_ctrl.EA_A_Sel  := EA_A_SRC_REG_AB;
+                    v_ctrl.EA_B_Sel  := EA_B_SRC_DATA_IN;
+                    if r_exec_IR = x"E0" then v_ctrl.EA_Op := EA_OP_ADD;
+                    else                       v_ctrl.EA_Op := EA_OP_SUB; end if;
+                    v_ctrl.Bus_Op    := EA_HIGH_elected;
+                    v_ctrl.Write_A   := '1';
+                    v_ctrl.F_Src_Sel := '1';
+                    v_ctrl.Write_F   := '1';
+                    v_ctrl.Flag_Mask := x"F0";
+                    v_needs_mem := true;
+
+                when ESS_OP16_FETCH1 =>
+                    v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_H := '1';
+                    v_ctrl.PC_Op      := PC_OP_INC;
+                    v_needs_mem := true;
+
+                when ESS_OP16_WB1 =>
+                    v_ctrl.EA_A_Sel  := EA_A_SRC_REG_AB;
+                    v_ctrl.EA_B_Sel  := EA_B_SRC_TMP;
+                    if r_exec_IR = x"E1" then v_ctrl.EA_Op := EA_OP_ADD;
+                    else                       v_ctrl.EA_Op := EA_OP_SUB; end if;
+                    v_ctrl.Bus_Op    := EA_HIGH_elected;
+                    v_ctrl.Write_A   := '1';
+                    v_ctrl.F_Src_Sel := '1';
+                    v_ctrl.Write_F   := '1';
+                    v_ctrl.Flag_Mask := x"F0";
+
+                when ESS_OP16_WB2 =>
+                    v_ctrl.EA_A_Sel := EA_A_SRC_REG_AB;
+                    if r_exec_IR = x"E0" or r_exec_IR = x"E2" then
+                        v_ctrl.EA_B_Sel := EA_B_SRC_DATA_IN;
+                        v_ctrl.ABUS_Sel := ABUS_SRC_PC;
+                        v_ctrl.Mem_RE   := '1';
+                        v_needs_mem := true;
+                    else
+                        v_ctrl.EA_B_Sel := EA_B_SRC_TMP;
+                    end if;
+                    if r_exec_IR = x"E0" or r_exec_IR = x"E1" then
+                        v_ctrl.EA_Op := EA_OP_ADD;
+                    else
+                        v_ctrl.EA_Op := EA_OP_SUB;
+                    end if;
+                    v_ctrl.Bus_Op  := EA_LOW_elected;
                     v_ctrl.Write_B := '1';
                     v_ctrl.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
-                end if;
-                v_ctrl.Write_F := '1'; v_ctrl.Flag_Mask(idx_fZ) := '1'; -- LD afecta a Z
-                next_state     <= S_FETCH;
 
-            when S_EXEC_ST_ABS_WRITE =>
-                -- TMP tiene la dirección. Ponemos la dirección y el dato de A en los buses y escribimos.
-                v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
-                v_ctrl.EA_B_Sel := EA_B_SRC_ZERO;
-                v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
-                if r_IR(4) = '1' then -- Opcodes 3x (ST A) vs 4x (ST B)
-                    v_ctrl.Out_Sel := OUT_SEL_A;
-                else
-                    v_ctrl.Out_Sel := OUT_SEL_B;
-                end if;
-                v_ctrl.Mem_WE   := '1';
-                next_state      <= S_FETCH;
+                when ESS_LDSP_1 =>
+                    v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_H := '1';
+                    v_ctrl.PC_Op      := PC_OP_INC;
+                    v_needs_mem := true;
 
-            when S_EXEC_ST_IDX_WRITE =>
-                -- TMP tiene la base, B el índice. Calculamos EA y escribimos A.
-                v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
-                v_ctrl.EA_B_Sel := EA_B_SRC_REG_B;
-                v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
-                if r_IR(4) = '1' then v_ctrl.Out_Sel := OUT_SEL_A; else v_ctrl.Out_Sel := OUT_SEL_B; end if;
-                v_ctrl.Mem_WE   := '1';
-                -- Wrapping para [n+B] (0x34)
-                if r_IR = x"34" then
-                    v_ctrl.Force_ZP := '1';
-                end if;
-                next_state      <= S_FETCH;
+                when ESS_LDSP_2 =>
+                    v_ctrl.Load_Src_Sel := '1'; -- TMP
+                    v_ctrl.SP_Op        := SP_OP_LOAD;
 
-            when S_EXEC_PZ_FETCH =>
-                -- El operando 'n' está en InstrIn. Lo cargamos en TMP_L y limpiamos TMP_H.
-                v_ctrl.Clear_TMP  := '1';
-                v_ctrl.Load_TMP_L := '1';
-                v_ctrl.PC_Op      := PC_OP_INC;
-                -- Corrección: Activar lectura de memoria para leer 'n'
-                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                v_ctrl.Mem_RE     := '1';
-                
-                -- Bifurcación LD vs ST
-                if unsigned(r_IR) < x"30" then
-                    if r_IR = x"16" then next_state <= S_EXEC_LD_IDX_READ;
-                    else                 next_state <= S_EXEC_LD_ABS_READ; end if;
-                else
-                    if r_IR = x"34" then next_state <= S_EXEC_ST_IDX_WRITE;
-                    else                 next_state <= S_EXEC_ST_ABS_WRITE; end if;
-                end if;
+                when ESS_LDSP_AB =>
+                    v_ctrl.EA_A_Sel     := EA_A_SRC_REG_AB;
+                    v_ctrl.EA_B_Sel     := EA_B_SRC_ZERO;
+                    v_ctrl.EA_Op        := EA_OP_ADD;
+                    v_ctrl.Load_Src_Sel := LOAD_SRC_ALU_RES;
+                    v_ctrl.SP_Op        := SP_OP_LOAD;
 
-            when S_EXEC_INDB_SETUP =>
-                -- Preparamos para calcular [B] poniendo TMP a cero.
-                v_ctrl.Clear_TMP := '1';
-                -- En el siguiente ciclo, TMP será 0, y podemos usar el sumador
-                -- para calcular 0 + B.
-                -- La instrucción LD B, [B] es de 1 byte, PC ya apunta a la siguiente.
-                -- Reutilizamos el estado de lectura indexada.
-                next_state <= S_EXEC_LD_IDX_READ;
+                when ESS_STSP_WB =>
+                    v_ctrl.EA_A_Sel := EA_A_SRC_SP;
+                    v_ctrl.EA_B_Sel := EA_B_SRC_ZERO;
+                    v_ctrl.EA_Op    := EA_OP_ADD;
+                    if r_exec_IR = x"52" then v_ctrl.Bus_Op := EA_LOW_elected;
+                    else                       v_ctrl.Bus_Op := EA_HIGH_elected; end if;
+                    v_ctrl.Write_A  := '1';
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: Saltos Indirectos (JP/CALL ([nn]))
-            -- -----------------------------------------------------------------
-            when S_EXEC_IND_LOAD_PTR =>
-                -- Cargar PC con la dirección del puntero (que está en TMP)
-                v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP
-                v_ctrl.PC_Op        := PC_OP_LOAD;
-                next_state          <= S_EXEC_IND_READ_L;
+                when ESS_IO_FETCH =>
+                    v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_L := '1';
+                    v_ctrl.Clear_TMP  := '1';
+                    v_ctrl.PC_Op      := PC_OP_INC;
+                    v_needs_mem := true;
 
-            when S_EXEC_IND_READ_L =>
-                -- Leer byte bajo del destino final desde M[PC] -> TMP_L
-                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_L := '1';
-                v_ctrl.PC_Op      := PC_OP_INC;
-                next_state        <= S_EXEC_IND_READ_H;
+                when ESS_IO_SETUP =>
+                    v_ctrl.Clear_TMP := '1';
 
-            when S_EXEC_IND_READ_H =>
-                -- Leer byte alto del destino final desde M[PC] -> TMP_H
-                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_H := '1';
-                -- Siguiente: Cargar PC desde TMP (Destino Final). Reusamos JP_3.
-                next_state        <= S_EXEC_JP_3;
+                when ESS_IN_READ =>
+                    v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
+                    if r_exec_IR = x"D1" then v_ctrl.EA_B_Sel := EA_B_SRC_REG_B;
+                    else                       v_ctrl.EA_B_Sel := EA_B_SRC_ZERO; end if;
+                    v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
+                    v_ctrl.IO_RE    := '1';
+                    v_ctrl.MDR_WE   := '1';
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: IN / OUT
-            -- -----------------------------------------------------------------
-            when S_EXEC_IO_FETCH_PORT =>
-                -- Leer operando #n (número de puerto) y ponerlo en TMP.
-                -- PC se incrementa.
-                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_L := '1';
-                v_ctrl.Clear_TMP  := '1'; -- TMP_H = 0
-                v_ctrl.PC_Op      := PC_OP_INC;
-                
-                if r_IR = x"D0" then -- IN A, #n
-                    next_state <= S_EXEC_IN_READ;
-                else -- OUT #n, A
-                    next_state <= S_EXEC_OUT_WRITE;
-                end if;
+                when ESS_IN_WB =>
+                    v_ctrl.Bus_Op   := MEM_MDR_elected;
+                    v_ctrl.Write_A  := '1';
+                    v_ctrl.Write_F  := '1';
+                    v_ctrl.Flag_Mask(idx_fZ) := '1';
 
-            when S_EXEC_IO_SETUP_REG =>
-                -- IN A, [B] / OUT [B], A. 
-                -- Limpiamos TMP para que EA = 0 + B.
-                v_ctrl.Clear_TMP := '1';
-                if r_IR = x"D1" then -- IN A, [B]
-                    next_state <= S_EXEC_IN_READ;
-                else -- OUT [B], A
-                    next_state <= S_EXEC_OUT_WRITE;
-                end if;
+                when ESS_OUT_WRITE =>
+                    v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
+                    if r_exec_IR = x"D3" then v_ctrl.EA_B_Sel := EA_B_SRC_REG_B;
+                    else                       v_ctrl.EA_B_Sel := EA_B_SRC_ZERO; end if;
+                    v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
+                    v_ctrl.Out_Sel  := OUT_SEL_A;
+                    v_ctrl.IO_WE    := '1';
 
-            when S_EXEC_IN_READ =>
-                -- Leer del espacio I/O.
-                -- Dirección = EA (TMP + B o TMP + 0)
-                v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
-                -- Si es indirecto [B] (D1), usamos REG_B. Si es inmediato #n (D0), TMP tiene la dir, B=0.
-                if r_IR = x"D1" then v_ctrl.EA_B_Sel := EA_B_SRC_REG_B; else v_ctrl.EA_B_Sel := EA_B_SRC_ZERO; end if;
-                
-                v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
-                v_ctrl.IO_RE    := '1';
-                v_ctrl.MDR_WE   := '1';
-                next_state      <= S_EXEC_IN_WB;
+                when ESS_SKIP_BYTE =>
+                    v_ctrl.PC_Op := PC_OP_INC;
 
-            when S_EXEC_IN_WB =>
-                -- Escribir MDR en A y actualizar flag Z
-                v_ctrl.Bus_Op   := MEM_MDR_elected;
-                v_ctrl.Write_A  := '1';
-                v_ctrl.Write_F  := '1';
-                v_ctrl.Flag_Mask(idx_fZ) := '1';
-                next_state      <= S_FETCH;
+                when ESS_HALT =>
+                    null; -- processor stopped
 
-            when S_EXEC_OUT_WRITE =>
-                -- Escribir A en el espacio I/O.
-                v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
-                if r_IR = x"D3" then v_ctrl.EA_B_Sel := EA_B_SRC_REG_B; else v_ctrl.EA_B_Sel := EA_B_SRC_ZERO; end if;
-                v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
-                v_ctrl.Out_Sel  := OUT_SEL_A;
-                v_ctrl.IO_WE    := '1';
-                next_state      <= S_FETCH;
+                when ESS_IDLE =>
+                    null;
 
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: Operaciones 16-bit (ADD16, SUB16)
-            -- -----------------------------------------------------------------
-            when S_EXEC_OP16_IMM8_WB1 =>
-                -- Ops #n (0xE0, 0xE2). PC apunta al operando inmediato 8-bit.
-                -- Leer operando (DataIn), Sign-Extend y operar con A:B.
-                v_ctrl.ABUS_Sel := ABUS_SRC_PC;
-                v_ctrl.Mem_RE   := '1';
-                v_ctrl.PC_Op    := PC_OP_INC;
-
-                -- Configurar EA Adder: A=A:B, B=DataIn(sext).
-                v_ctrl.EA_A_Sel := EA_A_SRC_REG_AB;
-                v_ctrl.EA_B_Sel := EA_B_SRC_DATA_IN;
-                if r_IR = x"E0" then v_ctrl.EA_Op := EA_OP_ADD; else v_ctrl.EA_Op := EA_OP_SUB; end if;
-
-                -- Write-Back A (High) y Flags
-                v_ctrl.Bus_Op    := EA_HIGH_elected;
-                v_ctrl.Write_A   := '1';
-                v_ctrl.F_Src_Sel := '1'; -- Flags desde EA
-                v_ctrl.Write_F   := '1';
-                v_ctrl.Flag_Mask := x"F0";
-
-                -- Siguiente: Escribir B. Reutilizamos el estado WB_2 común.
-                next_state <= S_EXEC_OP16_WB_2;
-
-            when S_EXEC_OP16_FETCH_1 =>
-                -- Ya tenemos TMP_L (byte bajo operando). Leemos byte alto -> TMP_H.
-                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_H := '1';
-                v_ctrl.PC_Op      := PC_OP_INC;
-                next_state        <= S_EXEC_OP16_WB_1;
-
-            when S_EXEC_OP16_WB_1 =>
-                -- Paso 1: Ejecutar, escribir Byte Alto en A y actualizar Flags
-                -- Configurar EA Adder: A=A:B, B=TMP.
-                v_ctrl.EA_A_Sel := EA_A_SRC_REG_AB;
-                v_ctrl.EA_B_Sel := EA_B_SRC_TMP;
-                if r_IR = x"E1" then v_ctrl.EA_Op := EA_OP_ADD; else v_ctrl.EA_Op := EA_OP_SUB; end if;
-
-                -- Escribir EA_HIGH en A
-                v_ctrl.Bus_Op := EA_HIGH_elected;
-                v_ctrl.Write_A := '1';
-
-                -- Capturar flags de 16 bits ahora (antes de que A cambie y corrompa el cálculo)
-                v_ctrl.F_Src_Sel := '1'; -- Fuente = AddressPath
-                v_ctrl.Write_F   := '1';
-                v_ctrl.Flag_Mask := x"F0"; -- Actualizar C, V, Z (H no se usa en 16b)
-
-                next_state <= S_EXEC_OP16_WB_2;
-
-            when S_EXEC_OP16_WB_2 =>
-                -- Paso 2: Escribir Byte Bajo en B
-                -- Mantener configuración del sumador (aunque el resultado High sea inválido ahora porque A cambió,
-                -- el resultado Low sigue siendo válido porque solo depende de B y TMP_L).
-                v_ctrl.EA_A_Sel := EA_A_SRC_REG_AB;
-                if r_IR = x"E0" or r_IR = x"E2" then
-                    v_ctrl.EA_B_Sel := EA_B_SRC_DATA_IN; -- Para #n, necesitamos mantener el dato en bus
-                    v_ctrl.Mem_RE   := '1'; -- Mantener lectura (o asumir dato estable si es síncrono/latch)
-                else
-                    v_ctrl.EA_B_Sel := EA_B_SRC_TMP;     -- Para #nn, dato en TMP
-                end if;
-
-                if r_IR = x"E0" or r_IR = x"E1" then v_ctrl.EA_Op := EA_OP_ADD; else v_ctrl.EA_Op := EA_OP_SUB; end if;
-                -- Escribir EA_LOW en B
-                v_ctrl.Bus_Op  := EA_LOW_elected;
-                v_ctrl.Write_B := '1';
-                v_ctrl.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH)); -- R1 (B)
-
-                next_state <= S_FETCH;
-
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: Manipulación del Stack Pointer (LD SP, ST SP)
-            -- -----------------------------------------------------------------
-            when S_EXEC_LDSP_1 =>
-                -- LD SP, #nn. Byte bajo ya en TMP_L (decodificación con Load_TMP_L).
-                -- Leer byte alto desde M[PC]
-                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_H := '1';
-                v_ctrl.PC_Op      := PC_OP_INC;
-                next_state        <= S_EXEC_LDSP_2;
-
-            when S_EXEC_LDSP_2 =>
-                -- Cargar SP con valor de TMP
-                v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP
-                v_ctrl.SP_Op        := SP_OP_LOAD;
-                next_state          <= S_FETCH;
-
-            when S_EXEC_LDSP_AB =>
-                -- LD SP, A:B.
-                -- Usar EA Adder para pasar A:B (A:B + 0)
-                v_ctrl.EA_A_Sel     := EA_A_SRC_REG_AB;
-                v_ctrl.EA_B_Sel     := EA_B_SRC_ZERO;
-                v_ctrl.EA_Op        := EA_OP_ADD;
-                
-                -- Cargar SP con resultado EA
-                v_ctrl.Load_Src_Sel := '0'; -- Fuente = EA Adder
-                v_ctrl.SP_Op        := SP_OP_LOAD;
-                next_state          <= S_FETCH;
-
-            when S_EXEC_STSP_WB =>
-                -- ST SP_L, A (0x52) o ST SP_H, A (0x53).
-                -- Pasar SP por el EA Adder (SP + 0) para tenerlo en EA_Out
-                v_ctrl.EA_A_Sel := EA_A_SRC_SP;
-                v_ctrl.EA_B_Sel := EA_B_SRC_ZERO;
-                v_ctrl.EA_Op    := EA_OP_ADD;
-                
-                -- Escribir en A la parte seleccionada del resultado EA
-                if r_IR = x"52" then
-                    v_ctrl.Bus_Op := EA_LOW_elected;  -- SP[7:0]
-                else
-                    v_ctrl.Bus_Op := EA_HIGH_elected; -- SP[15:8]
-                end if;
-                
-                v_ctrl.Write_A := '1';
-                -- No afecta flags
-                next_state <= S_FETCH;
-
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: Salto Relativo Condicional (BEQ)
-            -- -----------------------------------------------------------------
-            when S_EXEC_BRANCH_REL_1 =>
-                -- PC apunta al operando rel8. Lo leemos y a la vez calculamos
-                -- la dirección de salto: (PC+1) + sign_ext(rel8).
-                -- El PC se incrementa para apuntar a la siguiente instrucción.
-                v_ctrl.ABUS_Sel := ABUS_SRC_PC;
-                v_ctrl.Mem_RE   := '1';
-                v_ctrl.PC_Op    := PC_OP_INC;
-                next_state      <= S_EXEC_BRANCH_REL_2;
-
-            when S_EXEC_BRANCH_REL_2 =>
-                -- El PC ya apunta a la siguiente instrucción (PC+1).
-                -- El operando rel8 está en InstrIn.
-                -- Usamos el sumador para calcular PC + rel8.
-                v_ctrl.EA_A_Sel     := EA_A_SRC_PC;
-                v_ctrl.EA_B_Sel     := EA_B_SRC_DATA_IN;
-                v_ctrl.Load_Src_Sel := LOAD_SRC_ALU_RES;
-                v_ctrl.PC_Op        := PC_OP_LOAD; -- Cargar PC con el resultado
-                next_state          <= S_FETCH;
-
-            when S_SKIP_BYTE =>
-                -- Salto no tomado: simplemente saltamos el operando y vamos a la siguiente.
-                v_ctrl.PC_Op := PC_OP_INC; -- Importante: Saltar el byte de offset (rel8)
-                next_state <= S_FETCH;
-
-            -- -----------------------------------------------------------------
-            -- EJECUCIÓN: JP nn (Opcode 0x70) - 3 bytes
-            -- -----------------------------------------------------------------
-            when S_EXEC_JP_1 =>
-                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_L := '1';       -- Cargar en TMP[7:0]
-                v_ctrl.PC_Op      := PC_OP_INC; -- Avanzar a High Byte
-                next_state        <= S_EXEC_JP_2;
-
-            when S_EXEC_JP_2 =>
-                v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                v_ctrl.Mem_RE     := '1';
-                v_ctrl.Load_TMP_H := '1';       -- Cargar en TMP[15:8]
-                v_ctrl.PC_Op      := PC_OP_INC; -- Avanzar
-                next_state        <= S_EXEC_JP_3;
-
-            when S_EXEC_JP_3 =>
-                v_ctrl.Load_Src_Sel := '1'; -- Fuente = TMP
-                v_ctrl.PC_Op        := PC_OP_LOAD;
-                next_state          <= S_FETCH;
-
-            when others =>
-                next_state <= S_FETCH;
-
-        end case;
+                when others =>
+                    null;
+            end case;
 
         -- =====================================================================
-        -- Lógica de Wait States (Global Stall)
+        -- Priority 2: Single-cycle EX (r_ID_EX.is_single='1')
         -- =====================================================================
-        -- Si estamos accediendo a memoria y esta no está lista, mantenemos el estado.
-        if (v_ctrl.Mem_RE = '1' or v_ctrl.Mem_WE = '1') and Mem_Ready = '0' then
-            next_state <= state;
+        elsif r_ID_EX.valid = '1' and r_ID_EX.is_single = '1' then
+            v_ctrl := r_ID_EX.ctrl;
+            if v_ctrl.Mem_RE = '1' or v_ctrl.Mem_WE = '1' then
+                v_needs_mem := true;
+            end if;
+            -- Overlap fetch if bus is free
+            if not v_needs_mem and r_IF_ID.valid = '0' then
+                v_fetch_ok := true;
+            end if;
+
+        -- =====================================================================
+        -- Priority 3: Operand fetch during DECODE (DSS_OP1 / DSS_OP2)
+        -- =====================================================================
+        elsif dss = DSS_OP1 or dss = DSS_OP2 then
+            v_ctrl.ABUS_Sel := ABUS_SRC_PC;
+            v_ctrl.Mem_RE   := '1';
+            v_ctrl.PC_Op    := PC_OP_INC;
+            -- Also latch into MDR for instructions that need it (LD A,#n etc.)
+            -- The seq_proc handles this selectively via MDR_WE in the ctrl word
+            -- built during DSS_OP1. For now, just drive the bus; MDR_WE is set
+            -- by the ctrl word in the ID_EX register after DSS completes.
+            v_needs_mem := true;
+
+        -- =====================================================================
+        -- Priority 4: Idle - fetch only
+        -- =====================================================================
+        else
+            if r_IF_ID.valid = '0' then
+                v_fetch_ok := true;
+            end if;
         end if;
 
-        -- Asignación final
-        CtrlBus <= v_ctrl;
-        
-    end process;
+        -- =====================================================================
+        -- Overlay FETCH when possible (pipeline overlap)
+        -- =====================================================================
+        if v_fetch_ok then
+            v_ctrl.ABUS_Sel := ABUS_SRC_PC;
+            v_ctrl.Mem_RE   := '1';
+            v_ctrl.PC_Op    := PC_OP_INC;
+        end if;
 
-end architecture Behavioral;
+        CtrlBus <= v_ctrl;
+
+    end process comb_proc;
+
+end architecture pipeline;
