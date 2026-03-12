@@ -141,6 +141,12 @@ architecture Structural of Processor_Top is
     --   Write_F con la máscara de flags adecuada, tras instrucciones ADD16/SUB16.
     signal s_AddressPath_Flags: status_vector;  -- Nuevo: Flags EA
 
+    -- s_addr_data_in: MUX de datos hacia AddressPath.DataIn.
+    --   Normalmente = MemData_In (carga TMP desde el bus de datos de memoria).
+    --   Cuando s_CtrlBus.Op_Sel='1' = s_CtrlBus.Op_Data (carga TMP desde operando
+    --   pre-fetched del pipeline para instrucciones de 3 bytes sin ciclo adicional de lectura).
+    signal s_addr_data_in : data_vector;
+
 begin
 
     -- ========================================================================
@@ -163,11 +169,18 @@ begin
     -- 2. Instantiation of the Address Path (16-bit operations)
     -- ========================================================================
     -- Gestiona PC, SP, LR, y calcula direcciones efectivas.
+
+    -- MUX de datos para AddressPath.DataIn:
+    --   Modo normal   (Op_Sel='0'): usa MemData_In (cargar TMP desde memoria externa).
+    --   Modo pipeline (Op_Sel='1'): usa Op_Data del CtrlBus (operando pre-fetched del pipeline
+    --     para instrucciones de 3 bytes, evitando un ciclo extra de lectura de memoria).
+    s_addr_data_in <= s_CtrlBus.Op_Data when s_CtrlBus.Op_Sel = '1' else MemData_In;
+
     Inst_AddrPath: AddressPath_comp
         Port map (
             clk          => clk,
             reset        => reset,
-            DataIn       => MemData_In,          -- MemData_In se distribuye aquí para cargar TMP byte a byte (ej. JP nn: Load_TMP_L / Load_TMP_H)
+            DataIn       => s_addr_data_in,          -- MUX: MemData_In normal / Op_Data del pipeline para ESS_TMP_FROM_OP*
             Index_B      => s_DataPath_IndexB,   -- Registro B desde DataPath: índice para modo [nn+B] y byte bajo del par A:B
             Index_A      => s_DataPath_RegA,     -- Registro A desde DataPath: byte alto del par A:B para ADD16/SUB16
             AddressBus   => s_AddressBus,         -- Bus de direcciones de 16 bits generado (sale al exterior vía MemAddress)

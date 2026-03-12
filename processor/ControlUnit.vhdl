@@ -405,6 +405,42 @@ begin
                     when ESS_SKIP_BYTE => ess <= ESS_IDLE;
                     when ESS_HALT      => ess <= ESS_HALT;
 
+                    -- Pipeline TMP loading: load TMP from r_exec_op1 (low) then r_exec_op2 (high)
+                    -- without accessing memory.  Two sequential states load each byte, then
+                    -- dispatch to the appropriate subsequent ESS state based on r_exec_IR.
+                    when ESS_TMP_FROM_OP1 =>
+                        -- After loading TMP_L, decide if we also need to load TMP_H (3-byte ops)
+                        -- or if TMP_H is already 0 (2-byte zero-page ops).
+                        case r_exec_IR is
+                            -- 2-byte zero-page [n] loads: TMP_H=0, dispatch to ESS_LD_ABS.
+                            when x"12"|x"22"             => ess <= ESS_LD_ABS;
+                            -- 2-byte zero-page [n+B] load/store: TMP_H=0, dispatch to IDX.
+                            when x"16"                   => ess <= ESS_LD_IDX;
+                            when x"34"                   => ess <= ESS_ST_IDX;
+                            -- 2-byte zero-page [n] stores: TMP_H=0, dispatch to ESS_ST_ABS.
+                            when x"30"|x"40"             => ess <= ESS_ST_ABS;
+                            -- 2-byte I/O immediate: TMP_L=port, TMP_H=0; dispatch to I/O.
+                            when x"D0"                   => ess <= ESS_IN_READ;
+                            when x"D2"                   => ess <= ESS_OUT_WRITE;
+                            -- All 3-byte ops: also need TMP_H from r_exec_op2
+                            when others                  => ess <= ESS_TMP_FROM_OP2;
+                        end case;
+
+                    when ESS_TMP_FROM_OP2 =>
+                        -- TMP is now fully loaded (both bytes).  Dispatch to the correct
+                        -- execution state based on the instruction opcode.
+                        case r_exec_IR is
+                            when x"13"|x"23"             => ess <= ESS_LD_ABS;
+                            when x"15"|x"25"             => ess <= ESS_LD_IDX;
+                            when x"31"|x"41"             => ess <= ESS_ST_ABS;
+                            when x"33"|x"42"             => ess <= ESS_ST_IDX;
+                            when x"70"                   => ess <= ESS_JP_3;
+                            when x"75"|x"76"             => ess <= ESS_CALL_3;
+                            when x"50"                   => ess <= ESS_LDSP_2;
+                            when x"E1"|x"E3"             => ess <= ESS_OP16_WB1;
+                            when others                  => ess <= ESS_IDLE;
+                        end case;
+
                     when others => ess <= ESS_IDLE;
                 end case;
 
@@ -432,46 +468,20 @@ begin
                             when x"06"                   => ess <= ESS_RTI_1;
                             when x"14"|x"24"             => ess <= ESS_INDB_SETUP;
                             when x"32"                   => ess <= ESS_INDB_SETUP;
-                            -- [n] modes: addr is in op1, go to PZ_FETCH-like states
-                            -- For pipeline version we skip ESS_ADDR_HI and go directly:
-                            when x"12"|x"22"|x"30"|x"40" => ess <= ESS_LD_ABS;
-                                -- Note: for [n], TMP_L=op1, TMP_H=0 must be set.
-                                -- The ESS_LD_ABS state uses TMP directly via EA.
-                                -- We rely on seq_proc setting TMP in the comb ESS_PZ_FETCH
-                                -- equivalence, but since ops are pre-decoded in pipeline,
-                                -- we handle this by going to ESS_PZ_FETCH to fetch the byte.
-                                -- Re-route: these are 2-byte ops; op1 is already the address.
-                                -- We need to load TMP from op1 first.
-                                -- Use ESS_PZ_FETCH which will: Clear_TMP=1, Load_TMP_L=op1
-                                -- But ESS_PZ_FETCH reads from memory (PC).
-                                -- For the pipeline version, we stored op1 in r_exec_op1.
-                                -- We'll handle this via a dedicated first-cycle in the ESS
-                                -- comb_proc by checking r_exec_op1 != x"00".
-                                -- For simplicity, add an ESS state to load TMP from op1.
-                                -- Since we don't have that state, we piggyback: set ess to
-                                -- ESS_INDB_SETUP which clears TMP, then go to ESS_LD_ABS.
-                                -- Actually this is wrong. Use ESS_PZ_FETCH.
-                            when x"16"                   => ess <= ESS_LD_IDX;
-                            when x"34"                   => ess <= ESS_ST_IDX;
-                            when x"15"|x"25"             => ess <= ESS_LD_IDX;
-                            when x"33"|x"42"             => ess <= ESS_ST_IDX;
-                            when x"13"|x"23"             => ess <= ESS_LD_ABS;
-                            when x"31"|x"41"             => ess <= ESS_ST_ABS;
-                            when x"50"                   => ess <= ESS_LDSP_1;
-                            when x"51"                   => ess <= ESS_LDSP_AB;
-                            when x"52"|x"53"             => ess <= ESS_STSP_WB;
-                            when x"60"|x"61"|x"62"|x"63" => ess <= ESS_PUSH_1;
-                            when x"64"|x"65"|x"66"|x"67" => ess <= ESS_POP_1;
-                            when x"70" =>
-                                -- 3-byte JP nn: op1=addrL op2=addrH already in r_exec_op1/2
-                                -- ESS_JP_3 loads PC from TMP; but TMP must be pre-loaded.
-                                -- We need ESS_CALL_1 equivalent (load TMP from exec_op1/2).
-                                -- Use CALL_1/CALL_2 sequence minus the push.
-                                ess <= ESS_JP_3; -- TMP was set during CALL_1/CALL_2 equivalent
-                                -- Note: for pipelined version, the DECODE stage should have
-                                -- fetched and stored op1/op2 so TMP can be driven from them.
-                                -- The actual TMP loading happens via ADDR_HI during DSS fetch.
-                                -- For 3-byte JP, the comb will load TMP at ESS dispatch.
+                            -- [n] zero-page 2-byte modes: op1 = byte address, op2 unused.
+                            -- ESS_TMP_FROM_OP1 will: Clear_TMP=1 (force TMP_H=0), Load_TMP_L=op1,
+                            -- Op_Sel=1 (use Op_Data from pipeline), then dispatch to ESS_LD/ST_ABS.
+                            when x"12"|x"22"|x"30"|x"40" => ess <= ESS_TMP_FROM_OP1;
+                            when x"16"|x"34"             => ess <= ESS_TMP_FROM_OP1;
+                            -- [nn] 3-byte absolute modes: op1=addr_L, op2=addr_H.
+                            -- ESS_TMP_FROM_OP1 loads TMP_L, then ESS_TMP_FROM_OP2 loads TMP_H.
+                            when x"13"|x"23"             => ess <= ESS_TMP_FROM_OP1;
+                            when x"31"|x"41"             => ess <= ESS_TMP_FROM_OP1;
+                            -- [nn+B] 3-byte indexed modes: op1=base_L, op2=base_H.
+                            when x"15"|x"25"             => ess <= ESS_TMP_FROM_OP1;
+                            when x"33"|x"42"             => ess <= ESS_TMP_FROM_OP1;
+                            -- JP nn (3-byte): op1=addr_L, op2=addr_H.
+                            when x"70"                   => ess <= ESS_TMP_FROM_OP1;
                             when x"71"|x"80"|x"81"|x"82"|x"83"|x"84"|x"85"|
                                  x"86"|x"87"|x"88"|x"89"|x"8A"|x"8B" =>
                                 v_taken := branch_taken_f(r_ID_EX.opcode, FlagsIn);
@@ -484,15 +494,29 @@ begin
                             when x"72"             => ess <= ESS_JPN_2;
                             when x"73"             => ess <= ESS_IND_LOAD;
                             when x"74"             => ess <= ESS_JP_AB;
-                            when x"75"             => ess <= ESS_CALL_3; -- TMP has dest from DSS
-                            when x"76"             => ess <= ESS_CALL_3;
+                            -- CALL nn / BSR nn (3-byte): op1=addr_L, op2=addr_H.
+                            -- ESS_TMP_FROM_OP1/OP2 will load TMP, then ESS_TMP_FROM_OP2
+                            -- dispatches to ESS_CALL_3 (SP--, push PC, jump to TMP).
+                            when x"75"|x"76"             => ess <= ESS_TMP_FROM_OP1;
                             when x"77"             => ess <= ESS_RET_1;
-                            when x"D0"             => ess <= ESS_IO_FETCH;
-                            when x"D1"             => ess <= ESS_IO_SETUP;
-                            when x"D2"             => ess <= ESS_IO_FETCH;
-                            when x"D3"             => ess <= ESS_IO_SETUP;
-                            when x"E0"|x"E2"       => ess <= ESS_OP16_IMM8;
-                            when x"E1"|x"E3"       => ess <= ESS_OP16_FETCH1;
+                            -- IN/OUT with immediate port: op1 = port number.
+                            -- ESS_TMP_FROM_OP1 loads TMP_L = port, TMP_H = 0.
+                            when x"D0"|x"D2"             => ess <= ESS_TMP_FROM_OP1;
+                            -- IN A,[B] / OUT [B],A: 1-byte instructions, no operand.
+                            -- ESS_IO_SETUP clears TMP; EA = 0+B = port address.
+                            when x"D1"|x"D3"             => ess <= ESS_IO_SETUP;
+                            -- LD SP,#nn (3-byte): op1=val_L, op2=val_H.
+                            -- Load TMP from ops, then ESS_TMP_FROM_OP2 → ESS_LDSP_2.
+                            when x"50"                   => ess <= ESS_TMP_FROM_OP1;
+                            when x"51"                   => ess <= ESS_LDSP_AB;
+                            when x"52"|x"53"             => ess <= ESS_STSP_WB;
+                            when x"60"|x"61"|x"62"|x"63" => ess <= ESS_PUSH_1;
+                            when x"64"|x"65"|x"66"|x"67" => ess <= ESS_POP_1;
+                            -- ADD16/SUB16 #n (2-byte IMM8): op1 = imm byte.
+                            when x"E0"|x"E2"             => ess <= ESS_OP16_IMM8;
+                            -- ADD16/SUB16 #nn (3-byte): op1=low, op2=high.
+                            -- Load TMP from ops, then ESS_TMP_FROM_OP2 → ESS_OP16_WB1.
+                            when x"E1"|x"E3"             => ess <= ESS_TMP_FROM_OP1;
                             when others            => ess <= ESS_IDLE;
                         end case;
 
@@ -943,7 +967,7 @@ begin
     -- =========================================================================
     -- Combinatorial Process: drive CtrlBus
     -- =========================================================================
-    comb_proc : process(ess, r_ID_EX, r_IF_ID, r_exec_IR,
+    comb_proc : process(ess, r_ID_EX, r_IF_ID, r_exec_IR, r_exec_op1, r_exec_op2,
                         FlagsIn, InstrIn, Mem_Ready, NMI, IRQ, I_Flag,
                         handling_nmi, dss)
         variable v_ctrl     : control_bus_t;
@@ -1423,6 +1447,30 @@ begin
                     -- Estado permanente: el procesador está detenido (HALT).
                     -- Solo una interrupción puede sacarlo de este estado.
                     null; -- processor stopped
+
+                when ESS_TMP_FROM_OP1 =>
+                    -- Pipeline operand load cycle 1: load TMP[7:0] from r_exec_op1.
+                    -- For zero-page 2-byte instructions: also clear TMP[15:8] to 0x00
+                    -- (force_zp equivalent).  Op_Sel='1' routes Op_Data to AddressPath
+                    -- DataIn instead of MemData_In.  No memory access needed.
+                    v_ctrl.Op_Data    := r_exec_op1;
+                    v_ctrl.Op_Sel     := '1';
+                    v_ctrl.Load_TMP_L := '1';
+                    -- For zero-page modes and I/O immediate, also clear TMP_H to 0x00.
+                    case r_exec_IR is
+                        when x"12"|x"22"|x"16"|x"30"|x"40"|x"32"|x"34"|x"D0"|x"D2"
+                            => v_ctrl.Clear_TMP := '1';
+                        when others => null;
+                    end case;
+
+                when ESS_TMP_FROM_OP2 =>
+                    -- Pipeline operand load cycle 2: load TMP[15:8] from r_exec_op2.
+                    -- After this cycle TMP contains the full 16-bit address/value.
+                    -- Op_Sel='1' routes Op_Data to AddressPath DataIn.
+                    -- No memory access; seq_proc will dispatch to the execution state.
+                    v_ctrl.Op_Data    := r_exec_op2;
+                    v_ctrl.Op_Sel     := '1';
+                    v_ctrl.Load_TMP_H := '1';
 
                 when ESS_IDLE =>
                     null;

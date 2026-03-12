@@ -198,6 +198,24 @@ package ControlUnit_pkg is
         -- La UC debe activar MDR_WE en el ciclo siguiente para capturar el dato del periférico.
         IO_RE       : std_logic;
 
+        -- =====================================================================
+        -- === PIPELINE OPERAND DATA ===
+        -- Datos de operando pre-decodificados en el pipeline (instrucciones de 3 bytes).
+        -- Cuando Op_Sel='1' y Load_TMP_L/H='1', el AddressPath carga TMP desde
+        -- Op_Data en lugar de desde el bus externo DataIn (MemData_In).
+        -- Esto permite al pipeline cargar TMP con operandos pre-fetched sin un
+        -- ciclo adicional de lectura de memoria.
+        -- =====================================================================
+
+        -- Byte de datos de operando desde los registros internos del pipeline (r_exec_op1/op2).
+        -- Solo válido cuando Op_Sel='1'. Se usa para cargar TMP en instrucciones 3-byte.
+        Op_Data     : data_vector;
+
+        -- Selector de fuente para la carga de TMP:
+        -- '0' = carga TMP desde DataIn (MemData_In) — modo normal.
+        -- '1' = carga TMP desde Op_Data (operando pre-fetched del pipeline).
+        Op_Sel      : std_logic;
+
     end record;
 
     -- =========================================================================
@@ -312,7 +330,13 @@ package ControlUnit_pkg is
         -- IO_WE='0': el bus de I/O no recibe escrituras.
         -- IO_RE='0': el bus de I/O no envía datos.
         -- Ambos permanecen a '0' excepto en instrucciones IN/OUT específicas.
-        IO_WE       => '0', IO_RE  => '0'
+        IO_WE       => '0', IO_RE  => '0',
+
+        -- Op_Data=0x00: sin dato de operando disponible (no relevante cuando Op_Sel='0').
+        Op_Data     => x"00",
+
+        -- Op_Sel='0': carga TMP desde el bus externo DataIn (modo normal de operación).
+        Op_Sel      => '0'
     );
 
     -- =========================================================================

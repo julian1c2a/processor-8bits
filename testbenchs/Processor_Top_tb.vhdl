@@ -159,16 +159,19 @@ begin
     end process;
 
     -- =========================================================================
-    -- Monitor de debug: imprime MemAddress cada 20 ciclos
+    -- Monitor de debug: imprime ADDR+DATA cada ciclo en rango 85..135 (TB-01)
     -- =========================================================================
     debug_proc: process
         variable cycle_cnt : integer := 0;
     begin
         wait until rising_edge(clk);
         cycle_cnt := cycle_cnt + 1;
-        if (cycle_cnt mod 20) = 0 then
+        if cycle_cnt >= 85 and cycle_cnt <= 135 then
             report "DBG clk=" & integer'image(cycle_cnt) &
                    " ADDR=" & to_hstring(MemAddress) &
+                   " DIN="  & to_hstring(MemData_In)  &
+                   " RE="   & std_logic'image(Mem_RE)  &
+                   " WE="   & std_logic'image(Mem_WE)  &
                    " halt=" & std_logic'image(halt_detect);
         end if;
     end process debug_proc;

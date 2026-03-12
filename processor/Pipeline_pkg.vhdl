@@ -131,7 +131,13 @@ package Pipeline_pkg is
 
         -- Miscellaneous
         ESS_SKIP_BYTE,    -- Advance PC past one operand byte (branch-not-taken)
-        ESS_HALT          -- Processor halted
+        ESS_HALT,         -- Processor halted
+
+        -- Pipeline: load TMP from pre-fetched operand registers (r_exec_op1/op2)
+        -- Used by 3-byte instructions (LD/ST [nn], JP nn, etc.) to load TMP without
+        -- an extra memory read cycle.  Two sequential states load low then high byte.
+        ESS_TMP_FROM_OP1, -- Load TMP[7:0]  from r_exec_op1 (low byte of 16-bit address)
+        ESS_TMP_FROM_OP2  -- Load TMP[15:8] from r_exec_op2 (high byte); then → next ESS
     );
 
     -- =========================================================================
