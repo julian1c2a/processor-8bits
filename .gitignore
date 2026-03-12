@@ -16,4 +16,10 @@ import_synplify_summary.txt
 processor-8bits.xpr
 processor-8bits.cache/
 processor-8bits.hw/
+processor-8bits.srcs
 processor-8bits.srcs/
+processor-8bits.srcs/*
+processor-8bits.srcs/*/*
+processor-8bits.srcs/*/*/*
+processor-8bits.srcs/*/*/*/*
+processor-8bits.srcs/*/*/*/*/*
