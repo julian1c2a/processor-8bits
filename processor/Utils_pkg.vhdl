@@ -28,6 +28,10 @@ package Utils_pkg is
     --   Ejemplo: ceil_log2(8) = 3  → se necesitan 3 bits para seleccionar entre 8 registros.
     --   Ejemplo: ceil_log2(1) = 0  → un solo elemento no requiere bits de selección.
     --
+    -- Consumidor directo: CONSTANTS_pkg.vhdl
+    --   REG_SEL_WIDTH := ceil_log2(NUM_REGISTERS)
+    --   Con NUM_REGISTERS=8 → REG_SEL_WIDTH=3; campo Reg_Sel en control_bus_t y en DataPath.
+    --
     -- El caso base (n <= 1 retorna 0) es correcto porque:
     --   - n=0: no tiene sentido direccionar 0 elementos; devolver 0 evita log2(0)=-inf.
     --   - n=1: con un único elemento no hace falta ningún bit selector (2^0 = 1).
