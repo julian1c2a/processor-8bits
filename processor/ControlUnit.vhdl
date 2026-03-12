@@ -92,19 +92,19 @@ architecture pipeline of ControlUnit is
     function branch_taken_f(opcode : data_vector; flags : status_vector) return boolean is
     begin
         case opcode is
-            when x"80"  => return flags(idx_fZ) = '1';
-            when x"81"  => return flags(idx_fZ) = '0';
-            when x"82"  => return flags(idx_fC) = '1';
-            when x"83"  => return flags(idx_fC) = '0';
-            when x"84"  => return flags(idx_fV) = '1';
-            when x"85"  => return flags(idx_fV) = '0';
-            when x"86"  => return flags(idx_fG) = '1';
-            when x"87"  => return flags(idx_fG) = '0';
-            when x"88"  => return (flags(idx_fG) = '1') or (flags(idx_fE) = '1');
-            when x"89"  => return (flags(idx_fG) = '0') and (flags(idx_fE) = '0');
-            when x"8A"  => return flags(idx_fH) = '1';
-            when x"8B"  => return flags(idx_fE) = '1';
-            when x"71"  => return true;
+            when x"80"  => return flags(idx_fZ) = '1';                            -- BEQ: salta si Zero activo
+            when x"81"  => return flags(idx_fZ) = '0';                            -- BNE: salta si Zero inactivo
+            when x"82"  => return flags(idx_fC) = '1';                            -- BCS: salta si Carry activo
+            when x"83"  => return flags(idx_fC) = '0';                            -- BCC: salta si Carry inactivo
+            when x"84"  => return flags(idx_fV) = '1';                            -- BVS: salta si oVerflow activo
+            when x"85"  => return flags(idx_fV) = '0';                            -- BVC: salta si oVerflow inactivo
+            when x"86"  => return flags(idx_fG) = '1';                            -- BGT: salta si Mayor (con signo)
+            when x"87"  => return flags(idx_fG) = '0';                            -- BLT: salta si Menor (con signo)
+            when x"88"  => return (flags(idx_fG) = '1') or (flags(idx_fE) = '1'); -- BGE: salta si Mayor o Igual
+            when x"89"  => return (flags(idx_fG) = '0') and (flags(idx_fE) = '0');-- BLE: salta si Menor estricto (no igual)
+            when x"8A"  => return flags(idx_fH) = '1';                            -- BH:  salta si Half-carry activo (BCD)
+            when x"8B"  => return flags(idx_fE) = '1';                            -- BEQ2: salta si Equal (resultado de CMP)
+            when x"71"  => return true;                                            -- JR: salto relativo incondicional
             when others => return false;
         end case;
     end function;
@@ -112,17 +112,17 @@ architecture pipeline of ControlUnit is
     function reads_a_f(op : data_vector) return std_logic is
     begin
         case op is
-            when x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"|x"97" => return '1';
-            when x"A0"|x"A1"|x"A2"|x"A3"|x"A4"|x"A5"|x"A6"|x"A7" => return '1';
-            when x"C0"|x"C1"|x"C2"|x"C3"|x"C6"|x"C7"             => return '1';
-            when x"C8"|x"C9"|x"CA"|x"CB"|x"CC"|x"CD"|x"CE"       => return '1';
-            when x"30"|x"31"|x"32"|x"33"|x"34"                    => return '1';
-            when x"60"|x"63"                                       => return '1';
-            when x"20"                                             => return '1';
-            when x"D2"|x"D3"                                       => return '1';
-            when x"E0"|x"E1"|x"E2"|x"E3"                          => return '1';
-            when x"51"|x"52"|x"53"                                 => return '1';
-            when x"02"|x"03"                                       => return '1';
+            when x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"|x"97" => return '1'; -- ALU reg A op B  (ADD/ADC/SUB/SBB/AND/OR/XOR/CMP)
+            when x"A0"|x"A1"|x"A2"|x"A3"|x"A4"|x"A5"|x"A6"|x"A7" => return '1'; -- ALU imm A op #n (mismas ops con operando inmediato)
+            when x"C0"|x"C1"|x"C2"|x"C3"|x"C6"|x"C7"             => return '1'; -- Unarias sobre A: NOT/NEG/INC/DEC/CLR/SET
+            when x"C8"|x"C9"|x"CA"|x"CB"|x"CC"|x"CD"|x"CE"       => return '1'; -- Desplazamientos/rotaciones sobre A
+            when x"30"|x"31"|x"32"|x"33"|x"34"                    => return '1'; -- ST A,[addr]: A es el dato a escribir
+            when x"60"|x"63"                                       => return '1'; -- PUSH A / PUSH A:B
+            when x"20"                                             => return '1'; -- LD B,A
+            when x"D2"|x"D3"                                       => return '1'; -- OUT #n,A / OUT [B],A: A es el dato de salida
+            when x"E0"|x"E1"|x"E2"|x"E3"                          => return '1'; -- ADD16/SUB16: A es el byte alto del par A:B
+            when x"51"|x"52"|x"53"                                 => return '1'; -- LD SP,A:B / ST SP_L,A / ST SP_H,A
+            when x"02"|x"03"                                       => return '1'; -- SEC/CLC: usan la ALU a través de A para modificar Carry
             when others => return '0';
         end case;
     end function;
@@ -130,18 +130,18 @@ architecture pipeline of ControlUnit is
     function reads_b_f(op : data_vector) return std_logic is
     begin
         case op is
-            when x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"|x"97" => return '1';
-            when x"C4"|x"C5"                                       => return '1';
-            when x"10"                                             => return '1';
-            when x"14"|x"24"                                       => return '1';
-            when x"15"|x"16"                                       => return '1';
-            when x"25"                                             => return '1';
-            when x"32"|x"33"|x"34"                                => return '1';
-            when x"42"                                             => return '1';
-            when x"61"|x"63"                                       => return '1';
-            when x"D1"|x"D3"                                       => return '1';
-            when x"E0"|x"E1"|x"E2"|x"E3"                          => return '1';
-            when x"51"                                             => return '1';
+            when x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"|x"97" => return '1'; -- ALU reg: B es el segundo operando
+            when x"C4"|x"C5"                                       => return '1'; -- INCB / DECB: opera sobre B
+            when x"10"                                             => return '1'; -- LD A,B
+            when x"14"|x"24"                                       => return '1'; -- LD A,[B] / LD B,[B]: B es la dirección
+            when x"15"|x"16"                                       => return '1'; -- LD A,[nn+B] / LD A,[n+B]: B es el índice
+            when x"25"                                             => return '1'; -- LD B,[nn+B]: B es el índice
+            when x"32"|x"33"|x"34"                                => return '1'; -- ST A,[B] / ST A,[nn+B] / ST A,[n+B]
+            when x"42"                                             => return '1'; -- ST B,[nn+B]: B es índice y dato fuente
+            when x"61"|x"63"                                       => return '1'; -- PUSH B / PUSH A:B
+            when x"D1"|x"D3"                                       => return '1'; -- IN A,[B] / OUT [B],A: B es la dirección de puerto
+            when x"E0"|x"E1"|x"E2"|x"E3"                          => return '1'; -- ADD16/SUB16: B es el byte bajo del par A:B
+            when x"51"                                             => return '1'; -- LD SP,A:B
             when others => return '0';
         end case;
     end function;
@@ -149,15 +149,15 @@ architecture pipeline of ControlUnit is
     function writes_a_f(op : data_vector) return std_logic is
     begin
         case op is
-            when x"10"|x"11"|x"12"|x"13"|x"14"|x"15"|x"16"       => return '1';
-            when x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"       => return '1';
-            when x"A0"|x"A1"|x"A2"|x"A3"|x"A4"|x"A5"|x"A6"       => return '1';
-            when x"C0"|x"C1"|x"C2"|x"C3"|x"C6"|x"C7"             => return '1';
-            when x"C8"|x"C9"|x"CA"|x"CB"|x"CC"|x"CD"|x"CE"       => return '1';
-            when x"64"|x"67"                                       => return '1';
-            when x"D0"|x"D1"                                       => return '1';
-            when x"E0"|x"E1"|x"E2"|x"E3"                          => return '1';
-            when x"52"|x"53"                                       => return '1';
+            when x"10"|x"11"|x"12"|x"13"|x"14"|x"15"|x"16"       => return '1'; -- LD A,*: todas las formas de carga en A
+            when x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"       => return '1'; -- ALU reg (excluye CMP=0x97 que no escribe A)
+            when x"A0"|x"A1"|x"A2"|x"A3"|x"A4"|x"A5"|x"A6"       => return '1'; -- ALU imm (excluye CMP=0xA7)
+            when x"C0"|x"C1"|x"C2"|x"C3"|x"C6"|x"C7"             => return '1'; -- Unarias sobre A
+            when x"C8"|x"C9"|x"CA"|x"CB"|x"CC"|x"CD"|x"CE"       => return '1'; -- Desplazamientos/rotaciones sobre A
+            when x"64"|x"67"                                       => return '1'; -- POP A / POP A:B
+            when x"D0"|x"D1"                                       => return '1'; -- IN A,#n / IN A,[B]
+            when x"E0"|x"E1"|x"E2"|x"E3"                          => return '1'; -- ADD16/SUB16: byte alto del resultado va a A
+            when x"52"|x"53"                                       => return '1'; -- ST SP_L,A / ST SP_H,A: el byte del SP se lee en A
             when others => return '0';
         end case;
     end function;
@@ -165,10 +165,10 @@ architecture pipeline of ControlUnit is
     function writes_b_f(op : data_vector) return std_logic is
     begin
         case op is
-            when x"20"|x"21"|x"22"|x"23"|x"24"|x"25"             => return '1';
-            when x"C4"|x"C5"                                       => return '1';
-            when x"65"|x"67"                                       => return '1';
-            when x"E0"|x"E1"|x"E2"|x"E3"                          => return '1';
+            when x"20"|x"21"|x"22"|x"23"|x"24"|x"25"             => return '1'; -- LD B,*: todas las formas de carga en B
+            when x"C4"|x"C5"                                       => return '1'; -- INCB / DECB
+            when x"65"|x"67"                                       => return '1'; -- POP B / POP A:B
+            when x"E0"|x"E1"|x"E2"|x"E3"                          => return '1'; -- ADD16/SUB16: byte bajo del resultado va a B
             when others => return '0';
         end case;
     end function;
@@ -307,16 +307,20 @@ begin
                         if r_exec_IR = x"32" then ess <= ESS_ST_IDX;
                         else                      ess <= ESS_LD_IDX; end if;
 
-                    when ESS_LD_ABS  => ess <= ESS_LD_WB;
-                    when ESS_LD_IDX  => ess <= ESS_LD_WB;
-                    when ESS_LD_WB   => ess <= ESS_IDLE;
-                    when ESS_ST_ABS  => ess <= ESS_IDLE;
-                    when ESS_ST_IDX  => ess <= ESS_IDLE;
+                    -- Cadena LOAD: lectura de memoria → MDR → registro destino
+                    when ESS_LD_ABS  => ess <= ESS_LD_WB;  -- leer mem[TMP]   → MDR
+                    when ESS_LD_IDX  => ess <= ESS_LD_WB;  -- leer mem[TMP+B] → MDR
+                    when ESS_LD_WB   => ess <= ESS_IDLE;   -- MDR → A o B (write-back)
+                    -- Cadena STORE: escribe el registro directamente en memoria (1 ciclo)
+                    when ESS_ST_ABS  => ess <= ESS_IDLE;   -- A/B → mem[TMP]
+                    when ESS_ST_IDX  => ess <= ESS_IDLE;   -- A/B → mem[TMP+B]
 
+                    -- Cadena PUSH (3 ciclos): SP-- / escribir byte bajo / escribir byte alto
                     when ESS_PUSH_1  => ess <= ESS_PUSH_2;
                     when ESS_PUSH_2  => ess <= ESS_PUSH_3;
-                    when ESS_PUSH_3  => ess <= ESS_IDLE;
+                    when ESS_PUSH_3  => ess <= ESS_IDLE;   -- fin del push
 
+                    -- Cadena POP: variantes para POP A/B, POP F y POP A:B
                     when ESS_POP_1 =>
                         if r_exec_IR = x"67" then ess <= ESS_POP_AB_2;
                         else                      ess <= ESS_POP_2; end if;
@@ -325,8 +329,10 @@ begin
                         else                      ess <= ESS_IDLE; end if;
                     when ESS_POP_F_2  => ess <= ESS_IDLE;
                     when ESS_POP_AB_2 => ess <= ESS_POP_AB_3;
-                    when ESS_POP_AB_3 => ess <= ESS_IDLE;
+                    when ESS_POP_AB_3 => ess <= ESS_IDLE;  -- fin del POP A:B
 
+                    -- Cadena CALL (6 ciclos): fetch addr_L / fetch addr_H /
+                    --   SP-- / push PC_L / push PC_H / cargar PC desde TMP
                     when ESS_CALL_1 => ess <= ESS_CALL_2;
                     when ESS_CALL_2 => ess <= ESS_CALL_3;
                     when ESS_CALL_3 => ess <= ESS_CALL_4;
@@ -334,17 +340,21 @@ begin
                     when ESS_CALL_5 =>
                         if r_exec_IR = x"76" then ess <= ESS_IND_LOAD;
                         else                      ess <= ESS_CALL_6; end if;
-                    when ESS_CALL_6 => ess <= ESS_IDLE;
+                    when ESS_CALL_6 => ess <= ESS_IDLE;    -- PC ← TMP (salto al destino)
 
+                    -- Cadena RET (3 ciclos): pop PC_L / pop PC_H / PC←TMP + SP+=2
                     when ESS_RET_1 => ess <= ESS_RET_2;
                     when ESS_RET_2 => ess <= ESS_RET_3;
                     when ESS_RET_3 => ess <= ESS_IDLE;
 
+                    -- Cadena RTI (4 ciclos): pop F / pop PC_L / pop PC_H / PC←TMP
                     when ESS_RTI_1 => ess <= ESS_RTI_2;
                     when ESS_RTI_2 => ess <= ESS_RTI_3;
                     when ESS_RTI_3 => ess <= ESS_RTI_4;
-                    when ESS_RTI_4 => ess <= ESS_JP_3;
+                    when ESS_RTI_4 => ess <= ESS_JP_3;     -- comparte el salto final con JP
 
+                    -- Cadena INT (9 ciclos): SP-- / push PC_L / push PC_H /
+                    --   SP-- / push F / push 0x00 / fetch vec_L / fetch vec_H / PC←TMP
                     when ESS_INT_1 => ess <= ESS_INT_2;
                     when ESS_INT_2 => ess <= ESS_INT_3;
                     when ESS_INT_3 => ess <= ESS_INT_4;
@@ -354,29 +364,34 @@ begin
                     when ESS_INT_7 => ess <= ESS_INT_8;
                     when ESS_INT_8 => ess <= ESS_INT_9;
                     when ESS_INT_9 =>
-                        ess          <= ESS_IDLE;
-                        I_Flag       <= '0';
+                        ess          <= ESS_IDLE;            -- PC ← TMP (salto al handler)
+                        I_Flag       <= '0';                 -- limpiar bandera de interrupción interna
                         handling_nmi <= '0';
 
-                    when ESS_BRANCH_2 => ess <= ESS_IDLE;
-                    when ESS_JP_3     => ess <= ESS_IDLE;
-                    when ESS_JP_AB    => ess <= ESS_IDLE;
-                    when ESS_JPN_2    => ess <= ESS_IDLE;
+                    -- Saltos y ramas (1-2 ciclos extra según tipo)
+                    when ESS_BRANCH_2 => ess <= ESS_IDLE;   -- PC ← PC + offset (rama relativa tomada)
+                    when ESS_JP_3     => ess <= ESS_IDLE;   -- PC ← TMP (salto absoluto)
+                    when ESS_JP_AB    => ess <= ESS_IDLE;   -- PC ← A:B
+                    when ESS_JPN_2    => ess <= ESS_IDLE;   -- PC_L ← TMP_L (salto pág. cero)
 
+                    -- Salto indirecto: lee 2 bytes de [TMP] para obtener la dirección destino
                     when ESS_IND_LOAD   => ess <= ESS_IND_READ_L;
                     when ESS_IND_READ_L => ess <= ESS_IND_READ_H;
-                    when ESS_IND_READ_H => ess <= ESS_JP_3;
+                    when ESS_IND_READ_H => ess <= ESS_JP_3; -- dirección cargada; compartir salto con JP_3
 
+                    -- Aritmética de 16 bits ADD16/SUB16 (2-4 ciclos según modo)
                     when ESS_OP16_IMM8   => ess <= ESS_OP16_WB2;
                     when ESS_OP16_FETCH1 => ess <= ESS_OP16_WB1;
                     when ESS_OP16_WB1    => ess <= ESS_OP16_WB2;
-                    when ESS_OP16_WB2    => ess <= ESS_IDLE;
+                    when ESS_OP16_WB2    => ess <= ESS_IDLE; -- byte bajo del resultado → B
 
+                    -- Carga/lectura del Stack Pointer
                     when ESS_LDSP_1  => ess <= ESS_LDSP_2;
                     when ESS_LDSP_2  => ess <= ESS_IDLE;
                     when ESS_LDSP_AB => ess <= ESS_IDLE;
-                    when ESS_STSP_WB => ess <= ESS_IDLE;
+                    when ESS_STSP_WB => ess <= ESS_IDLE;    -- byte del SP ya en A
 
+                    -- Operaciones de E/S (IN / OUT)
                     when ESS_IO_FETCH =>
                         if r_exec_IR = x"D0" then ess <= ESS_IN_READ;
                         else                      ess <= ESS_OUT_WRITE; end if;
@@ -946,6 +961,8 @@ begin
 
             case ess is
                 when ESS_ADDR_HI =>
+                    -- Ciclo: lee el byte alto de la dirección desde [PC] → TMP_H; PC++.
+                    -- El estado siguiente depende del opcode en r_exec_IR.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
                     v_ctrl.Mem_RE     := '1';
                     v_ctrl.Load_TMP_H := '1';
@@ -953,17 +970,20 @@ begin
                     v_needs_mem := true;
 
                 when ESS_PZ_FETCH =>
+                    -- Ciclo: lee la dirección de página cero desde [PC] → TMP_L;
+                    -- fuerza TMP_H = 0 (Clear_TMP); PC++.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                    v_ctrl.Mem_RE     := '1';
-                    v_ctrl.Clear_TMP  := '1';
                     v_ctrl.Load_TMP_L := '1';
                     v_ctrl.PC_Op      := PC_OP_INC;
                     v_needs_mem := true;
 
                 when ESS_INDB_SETUP =>
+                    -- Ciclo: limpia TMP (base=0) para el modo [B] (dirección = 0 + B).
+                    -- No usa el bus de memoria; el siguiente ciclo usa EA = TMP + B.
                     v_ctrl.Clear_TMP := '1';
 
                 when ESS_LD_ABS =>
+                    -- Ciclo: lee mem[TMP] → MDR. Dirección absoluta almacenada en TMP.
                     v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
                     v_ctrl.EA_B_Sel := EA_B_SRC_ZERO;
                     v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
@@ -972,6 +992,8 @@ begin
                     v_needs_mem := true;
 
                 when ESS_LD_IDX =>
+                    -- Ciclo: lee mem[TMP + B] → MDR. TMP = base, B = índice.
+                    -- Force_ZP fuerza la suma a 8 bits (modo [n+B] de pág. cero).
                     v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
                     v_ctrl.EA_B_Sel := EA_B_SRC_REG_B;
                     v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
@@ -983,6 +1005,8 @@ begin
                     v_needs_mem := true;
 
                 when ESS_LD_WB =>
+                    -- Ciclo write-back: escribe MDR en A o B según el nibble alto del opcode.
+                    -- Bit 4 del opcode: '1' = LD A (familia 0x1x), '0' = LD B (familia 0x2x).
                     v_ctrl.Bus_Op := MEM_MDR_elected;
                     -- opcodes 1x = LD A, 2x = LD B (bit 4 distinguishes)
                     if r_exec_IR(4) = '1' then
@@ -995,6 +1019,7 @@ begin
                     v_ctrl.Flag_Mask(idx_fZ) := '1';
 
                 when ESS_ST_ABS =>
+                    -- Ciclo: escribe A o B en mem[TMP]. Bit 4 del opcode selecciona la fuente.
                     v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
                     v_ctrl.EA_B_Sel := EA_B_SRC_ZERO;
                     v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
@@ -1004,6 +1029,7 @@ begin
                     v_needs_mem := true;
 
                 when ESS_ST_IDX =>
+                    -- Ciclo: escribe A o B en mem[TMP + B]. Force_ZP para modo [n+B].
                     v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
                     v_ctrl.EA_B_Sel := EA_B_SRC_REG_B;
                     v_ctrl.ABUS_Sel := ABUS_SRC_EA_RES;
@@ -1014,9 +1040,11 @@ begin
                     v_needs_mem := true;
 
                 when ESS_PUSH_1 =>
+                    -- Ciclo 1/3: decrementa SP. El dato se escribirá en los ciclos 2 y 3.
                     v_ctrl.SP_Op := SP_OP_DEC;
 
                 when ESS_PUSH_2 =>
+                    -- Ciclo 2/3: escribe el byte bajo (A, B o F) en mem[SP].
                     v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
                     v_ctrl.Mem_WE    := '1';
                     v_ctrl.SP_Offset := '0';
@@ -1029,14 +1057,15 @@ begin
                     v_needs_mem := true;
 
                 when ESS_PUSH_3 =>
+                    -- Ciclo 3/3: escribe el byte alto en mem[SP+1].
+                    -- Para PUSH A:B escribe A; para PUSH A/B/F escribe 0x00 (relleno).
                     v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
-                    v_ctrl.Mem_WE    := '1';
-                    v_ctrl.SP_Offset := '1';
                     if r_exec_IR = x"63" then v_ctrl.Out_Sel := OUT_SEL_A;
                     else                       v_ctrl.Out_Sel := OUT_SEL_ZERO; end if;
                     v_needs_mem := true;
 
                 when ESS_POP_1 =>
+                    -- Ciclo 1: lee mem[SP] → MDR. El dato será A, B, F o byte bajo de A:B.
                     v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
                     v_ctrl.Mem_RE    := '1';
                     v_ctrl.MDR_WE    := '1';
@@ -1044,6 +1073,7 @@ begin
                     v_needs_mem := true;
 
                 when ESS_POP_2 =>
+                    -- Ciclo 2 (POP A o POP B): MDR → registro; SP++.
                     v_ctrl.Bus_Op := MEM_MDR_elected;
                     v_ctrl.SP_Op  := SP_OP_INC;
                     if r_exec_IR = x"65" then
@@ -1054,11 +1084,15 @@ begin
                     end if;
 
                 when ESS_POP_F_2 =>
+                    -- Ciclo 2 (POP F): restaura el registro de flags desde MDR; SP++.
+                    -- Usa Load_F_Direct para evitar el enmascaramiento normal de flags.
                     v_ctrl.Bus_Op        := MEM_MDR_elected;
                     v_ctrl.Load_F_Direct := '1';
                     v_ctrl.SP_Op         := SP_OP_INC;
 
                 when ESS_POP_AB_2 =>
+                    -- Ciclo 2 (POP A:B): MDR → B; lee mem[SP+1] → MDR (para A).
+                    -- Lee y escribe en el mismo ciclo para solapar las dos lecturas del stack.
                     v_ctrl.Bus_Op    := MEM_MDR_elected;
                     v_ctrl.Write_B   := '1';
                     v_ctrl.Reg_Sel   := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
@@ -1069,18 +1103,16 @@ begin
                     v_needs_mem := true;
 
                 when ESS_POP_AB_3 =>
+                    -- Ciclo 3 (POP A:B): MDR → A; SP++ (incremento total = +2).
                     v_ctrl.Bus_Op  := MEM_MDR_elected;
                     v_ctrl.Write_A := '1';
                     v_ctrl.SP_Op   := SP_OP_INC;
 
                 when ESS_CALL_1 =>
+                    -- Ciclo 1/6: lee el byte bajo de la dirección destino [PC] → TMP_L; PC++.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                    v_ctrl.Mem_RE     := '1';
-                    v_ctrl.Load_TMP_L := '1';
-                    v_ctrl.PC_Op      := PC_OP_INC;
-                    v_needs_mem := true;
-
-                when ESS_CALL_2 =>
+                    -- Ciclo 2/6: lee el byte alto de la dirección destino [PC] → TMP_H; PC++.
+                    -- Al finalizar TMP tiene la dirección completa de la rutina.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
                     v_ctrl.Mem_RE     := '1';
                     v_ctrl.Load_TMP_H := '1';
@@ -1088,9 +1120,12 @@ begin
                     v_needs_mem := true;
 
                 when ESS_CALL_3 =>
+                    -- Ciclo 3/6: decrementa SP. La dirección de retorno (PC actual) se
+                    -- empujará en los dos ciclos siguientes (byte bajo primero).
                     v_ctrl.SP_Op := SP_OP_DEC;
 
                 when ESS_CALL_4 =>
+                    -- Ciclo 4/6: guarda PCL (byte bajo del PC de retorno) en mem[SP].
                     v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
                     v_ctrl.Mem_WE    := '1';
                     v_ctrl.Out_Sel   := OUT_SEL_PCL;
@@ -1098,6 +1133,8 @@ begin
                     v_needs_mem := true;
 
                 when ESS_CALL_5 =>
+                    -- Ciclo 5/6: guarda PCH (byte alto del PC de retorno) en mem[SP+1].
+                    -- Para CALL ind (0x76) el siguiente paso derreferencia la dirección.
                     v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
                     v_ctrl.Mem_WE    := '1';
                     v_ctrl.Out_Sel   := OUT_SEL_PCH;
@@ -1105,29 +1142,22 @@ begin
                     v_needs_mem := true;
 
                 when ESS_CALL_6 =>
+                    -- Ciclo 6/6: carga PC desde TMP (salto al inicio de la rutina).
                     v_ctrl.Load_Src_Sel := '1'; -- TMP
                     v_ctrl.PC_Op        := PC_OP_LOAD;
 
                 when ESS_RET_1 =>
+                    -- Ciclo 1/3: lee la dirección de retorno byte bajo desde mem[SP] → TMP_L.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
-                    v_ctrl.SP_Offset  := '0';
-                    v_ctrl.Mem_RE     := '1';
-                    v_ctrl.Load_TMP_L := '1';
-                    v_needs_mem := true;
-
-                when ESS_RET_2 =>
+                    -- Ciclo 2/3: lee la dirección de retorno byte alto desde mem[SP+1] → TMP_H.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
-                    v_ctrl.SP_Offset  := '1';
-                    v_ctrl.Mem_RE     := '1';
-                    v_ctrl.Load_TMP_H := '1';
-                    v_needs_mem := true;
-
-                when ESS_RET_3 =>
+                    -- Ciclo 3/3: PC ← TMP (retorno); SP += 2 (libera trama de 2 bytes del stack).
                     v_ctrl.Load_Src_Sel := '1'; -- TMP
                     v_ctrl.PC_Op        := PC_OP_LOAD;
                     v_ctrl.SP_Op        := SP_OP_INC;
 
                 when ESS_RTI_1 =>
+                    -- Ciclo 1/4: lee los flags guardados desde mem[SP] → MDR.
                     v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
                     v_ctrl.SP_Offset := '0';
                     v_ctrl.Mem_RE    := '1';
@@ -1135,18 +1165,16 @@ begin
                     v_needs_mem := true;
 
                 when ESS_RTI_2 =>
+                    -- Ciclo 2/4: restaura registro de flags (MDR → F directo, sin máscara); SP++.
                     v_ctrl.Bus_Op        := MEM_MDR_elected;
                     v_ctrl.Load_F_Direct := '1';
                     v_ctrl.SP_Op         := SP_OP_INC;
 
                 when ESS_RTI_3 =>
+                    -- Ciclo 3/4: lee byte bajo de la dirección de retorno desde mem[SP] → TMP_L.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
-                    v_ctrl.SP_Offset  := '0';
-                    v_ctrl.Mem_RE     := '1';
-                    v_ctrl.Load_TMP_L := '1';
-                    v_needs_mem := true;
-
-                when ESS_RTI_4 =>
+                    -- Ciclo 4/4: lee byte alto desde mem[SP+1] → TMP_H.
+                    -- El estado siguiente (ESS_JP_3) carga PC desde TMP.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
                     v_ctrl.SP_Offset  := '1';
                     v_ctrl.Mem_RE     := '1';
@@ -1154,9 +1182,11 @@ begin
                     v_needs_mem := true;
 
                 when ESS_INT_1 =>
+                    -- Ciclo 1/9 (atención a interrupción): SP-- para empujar PCL.
                     v_ctrl.SP_Op := SP_OP_DEC;
 
                 when ESS_INT_2 =>
+                    -- Ciclo 2/9: guarda PCL (byte bajo del PC interrumpido) en mem[SP].
                     v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
                     v_ctrl.Mem_WE    := '1';
                     v_ctrl.Out_Sel   := OUT_SEL_PCL;
@@ -1164,16 +1194,13 @@ begin
                     v_needs_mem := true;
 
                 when ESS_INT_3 =>
+                    -- Ciclo 3/9: guarda PCH (byte alto del PC interrumpido) en mem[SP+1].
                     v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
-                    v_ctrl.Mem_WE    := '1';
-                    v_ctrl.Out_Sel   := OUT_SEL_PCH;
-                    v_ctrl.SP_Offset := '1';
-                    v_needs_mem := true;
-
-                when ESS_INT_4 =>
+                    -- Ciclo 4/9: SP-- para empujar el registro de flags.
                     v_ctrl.SP_Op := SP_OP_DEC;
 
                 when ESS_INT_5 =>
+                    -- Ciclo 5/9: guarda los flags actuales en mem[SP].
                     v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
                     v_ctrl.Mem_WE    := '1';
                     v_ctrl.Out_Sel   := OUT_SEL_F;
@@ -1181,6 +1208,7 @@ begin
                     v_needs_mem := true;
 
                 when ESS_INT_6 =>
+                    -- Ciclo 6/9: escribe 0x00 en mem[SP+1] (trama de 2 bytes por elemento).
                     v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
                     v_ctrl.Mem_WE    := '1';
                     v_ctrl.Out_Sel   := OUT_SEL_ZERO;
@@ -1188,6 +1216,8 @@ begin
                     v_needs_mem := true;
 
                 when ESS_INT_7 =>
+                    -- Ciclo 7/9: lee el byte bajo del vector de interrupción → TMP_L.
+                    -- Usa ABUS_SRC_VEC_NMI_L o VEC_IRQ_L según el tipo de interrupción.
                     if handling_nmi = '1' then v_ctrl.ABUS_Sel := ABUS_SRC_VEC_NMI_L;
                     else                        v_ctrl.ABUS_Sel := ABUS_SRC_VEC_IRQ_L; end if;
                     v_ctrl.Mem_RE     := '1';
@@ -1195,6 +1225,7 @@ begin
                     v_needs_mem := true;
 
                 when ESS_INT_8 =>
+                    -- Ciclo 8/9: lee el byte alto del vector de interrupción → TMP_H.
                     if handling_nmi = '1' then v_ctrl.ABUS_Sel := ABUS_SRC_VEC_NMI_H;
                     else                        v_ctrl.ABUS_Sel := ABUS_SRC_VEC_IRQ_H; end if;
                     v_ctrl.Mem_RE     := '1';
@@ -1202,48 +1233,58 @@ begin
                     v_needs_mem := true;
 
                 when ESS_INT_9 =>
+                    -- Ciclo 9/9: PC ← TMP (salta al handler); seq_proc limpia I_Flag y handling_nmi.
                     v_ctrl.Load_Src_Sel := '1'; -- TMP
                     v_ctrl.PC_Op        := PC_OP_LOAD;
 
                 when ESS_BRANCH_2 =>
+                    -- Ciclo final de rama relativa tomada: PC ← PC + offset con signo.
+                    -- EA = PC + DataIn (offset de 8 bits en complemento a 2).
                     v_ctrl.EA_A_Sel     := EA_A_SRC_PC;
                     v_ctrl.EA_B_Sel     := EA_B_SRC_DATA_IN;
                     v_ctrl.Load_Src_Sel := LOAD_SRC_ALU_RES;
                     v_ctrl.PC_Op        := PC_OP_LOAD;
 
                 when ESS_JP_3 =>
+                    -- Ciclo final de salto absoluto: PC ← TMP (16 bits ya en TMP).
+                    -- Compartido por JP nn, CALL, RET, RTI e INT.
                     v_ctrl.Load_Src_Sel := '1'; -- TMP
                     v_ctrl.PC_Op        := PC_OP_LOAD;
-                    -- RET and RTI: also restore SP (handled in RET_3, not here)
+                    -- RET y RTI: también restauran SP (manejado en RET_3, no aquí)
 
                 when ESS_JP_AB =>
+                    -- Ciclo único: PC ← A:B. Calcula EA = A:B + 0 y carga PC.
                     v_ctrl.EA_A_Sel     := EA_A_SRC_REG_AB;
                     v_ctrl.EA_B_Sel     := EA_B_SRC_ZERO;
                     v_ctrl.Load_Src_Sel := LOAD_SRC_ALU_RES;
                     v_ctrl.PC_Op        := PC_OP_LOAD;
 
                 when ESS_JPN_2 =>
-                    v_ctrl.Load_Src_Sel := '1'; -- TMP (low byte only)
+                    -- Ciclo único: carga solo el byte bajo del PC desde TMP_L (salto pág. cero).
+                    -- PC_H permanece sin cambio; efecto = salto dentro de la misma página.
+                    v_ctrl.Load_Src_Sel := '1'; -- TMP
                     v_ctrl.PC_Op        := PC_OP_LOAD_L;
 
                 when ESS_IND_LOAD =>
+                    -- Ciclo 1/3 de salto indirecto: PC ← TMP (apunta al puntero en memoria).
+                    -- Los dos ciclos siguientes leen los 2 bytes del puntero destino.
                     v_ctrl.Load_Src_Sel := '1'; -- TMP
                     v_ctrl.PC_Op        := PC_OP_LOAD;
 
                 when ESS_IND_READ_L =>
+                    -- Ciclo 2/3: lee el byte bajo del destino indirecto [PC] → TMP_L; PC++.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                    v_ctrl.Mem_RE     := '1';
-                    v_ctrl.Load_TMP_L := '1';
-                    v_ctrl.PC_Op      := PC_OP_INC;
-                    v_needs_mem := true;
-
-                when ESS_IND_READ_H =>
+                    -- Ciclo 3/3: lee el byte alto del destino indirecto [PC] → TMP_H.
+                    -- El siguiente estado (ESS_JP_3) carga PC desde TMP.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
                     v_ctrl.Mem_RE     := '1';
                     v_ctrl.Load_TMP_H := '1';
                     v_needs_mem := true;
 
                 when ESS_OP16_IMM8 =>
+                    -- Ciclo único para ADD16/SUB16 #n (inmediato de 8 bits):
+                    -- lee #n desde [PC]; calcula A:B +/- #n; escribe A (byte alto).
+                    -- ESS_OP16_WB2 (siguiente ciclo) completará el byte bajo en B.
                     v_ctrl.ABUS_Sel  := ABUS_SRC_PC;
                     v_ctrl.Mem_RE    := '1';
                     v_ctrl.PC_Op     := PC_OP_INC;
@@ -1259,6 +1300,9 @@ begin
                     v_needs_mem := true;
 
                 when ESS_OP16_FETCH1 =>
+                    -- Ciclo 1/3 para ADD16/SUB16 nn (operando de 16 bits en memoria):
+                    -- Lee el byte alto del operando [PC] → TMP_H; PC++.
+                    -- (El byte bajo op1 ya fue guardado durante DSS; se usa en WB1 vía TMP.)
                     v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
                     v_ctrl.Mem_RE     := '1';
                     v_ctrl.Load_TMP_H := '1';
@@ -1266,6 +1310,7 @@ begin
                     v_needs_mem := true;
 
                 when ESS_OP16_WB1 =>
+                    -- Ciclo 2/3: calcula A:B +/- TMP (operando 16-bit); escribe byte alto → A.
                     v_ctrl.EA_A_Sel  := EA_A_SRC_REG_AB;
                     v_ctrl.EA_B_Sel  := EA_B_SRC_TMP;
                     if r_exec_IR = x"E1" then v_ctrl.EA_Op := EA_OP_ADD;
@@ -1277,6 +1322,9 @@ begin
                     v_ctrl.Flag_Mask := x"F0";
 
                 when ESS_OP16_WB2 =>
+                    -- Ciclo 3/3 (o 2/2 para modo IMM8): escribe el byte bajo del resultado → B.
+                    -- Para IMM8: EA_B = DataIn (el inmediato leido este mismo ciclo).
+                    -- Para modo nn: EA_B = TMP (ya disponible tras FETCH1+WB1).
                     v_ctrl.EA_A_Sel := EA_A_SRC_REG_AB;
                     if r_exec_IR = x"E0" or r_exec_IR = x"E2" then
                         v_ctrl.EA_B_Sel := EA_B_SRC_DATA_IN;
@@ -1296,6 +1344,8 @@ begin
                     v_ctrl.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
 
                 when ESS_LDSP_1 =>
+                    -- Ciclo 1/2 (LD SP,nn): lee el byte alto de la dirección nn → TMP_H; PC++.
+                    -- op1 (byte bajo) ya fue cargado en r_exec_op1 durante DSS.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
                     v_ctrl.Mem_RE     := '1';
                     v_ctrl.Load_TMP_H := '1';
@@ -1303,10 +1353,9 @@ begin
                     v_needs_mem := true;
 
                 when ESS_LDSP_2 =>
+                    -- Ciclo 2/2 (LD SP,nn): SP ← TMP (la dirección completa ya en TMP).
                     v_ctrl.Load_Src_Sel := '1'; -- TMP
-                    v_ctrl.SP_Op        := SP_OP_LOAD;
-
-                when ESS_LDSP_AB =>
+                    -- Ciclo único (LD SP,A:B): SP ← A:B usando el sumador EA.
                     v_ctrl.EA_A_Sel     := EA_A_SRC_REG_AB;
                     v_ctrl.EA_B_Sel     := EA_B_SRC_ZERO;
                     v_ctrl.EA_Op        := EA_OP_ADD;
@@ -1314,6 +1363,8 @@ begin
                     v_ctrl.SP_Op        := SP_OP_LOAD;
 
                 when ESS_STSP_WB =>
+                    -- Ciclo único (ST SP_L,A / ST SP_H,A): calcula EA = SP + 0;
+                    -- selecciona el byte bajo (EA_LOW) o alto (EA_HIGH) del SP → A.
                     v_ctrl.EA_A_Sel := EA_A_SRC_SP;
                     v_ctrl.EA_B_Sel := EA_B_SRC_ZERO;
                     v_ctrl.EA_Op    := EA_OP_ADD;
@@ -1322,6 +1373,8 @@ begin
                     v_ctrl.Write_A  := '1';
 
                 when ESS_IO_FETCH =>
+                    -- Ciclo 1 (IN/OUT con operando inmediato #n): lee la dirección de puerto
+                    -- desde [PC] → TMP_L; limpia TMP_H (dirección = 0x00nn); PC++.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
                     v_ctrl.Mem_RE     := '1';
                     v_ctrl.Load_TMP_L := '1';
@@ -1330,9 +1383,13 @@ begin
                     v_needs_mem := true;
 
                 when ESS_IO_SETUP =>
+                    -- Ciclo 1 (IN/OUT indexado por B): limpia TMP (base = 0).
+                    -- El ciclo siguiente usará EA = 0 + B = dirección de puerto.
                     v_ctrl.Clear_TMP := '1';
 
                 when ESS_IN_READ =>
+                    -- Ciclo de lectura de puerto: IO_RE sobre la dirección EA; resultado → MDR.
+                    -- Para IN A,[B]: EA = TMP + B. Para IN A,#n: EA = TMP + 0.
                     v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
                     if r_exec_IR = x"D1" then v_ctrl.EA_B_Sel := EA_B_SRC_REG_B;
                     else                       v_ctrl.EA_B_Sel := EA_B_SRC_ZERO; end if;
@@ -1341,12 +1398,15 @@ begin
                     v_ctrl.MDR_WE   := '1';
 
                 when ESS_IN_WB =>
+                    -- Ciclo write-back de IN: MDR → A; actualiza flag Z.
                     v_ctrl.Bus_Op   := MEM_MDR_elected;
                     v_ctrl.Write_A  := '1';
                     v_ctrl.Write_F  := '1';
                     v_ctrl.Flag_Mask(idx_fZ) := '1';
 
                 when ESS_OUT_WRITE =>
+                    -- Ciclo de escritura de puerto: IO_WE sobre la dirección EA; dato = A.
+                    -- Para OUT [B],A: EA = TMP + B. Para OUT #n,A: EA = TMP + 0.
                     v_ctrl.EA_A_Sel := EA_A_SRC_TMP;
                     if r_exec_IR = x"D3" then v_ctrl.EA_B_Sel := EA_B_SRC_REG_B;
                     else                       v_ctrl.EA_B_Sel := EA_B_SRC_ZERO; end if;
@@ -1355,9 +1415,13 @@ begin
                     v_ctrl.IO_WE    := '1';
 
                 when ESS_SKIP_BYTE =>
+                    -- Ciclo extra para rama relativa NO tomada: incrementa PC para
+                    -- saltar el byte de offset y reanudar el fetch normal.
                     v_ctrl.PC_Op := PC_OP_INC;
 
                 when ESS_HALT =>
+                    -- Estado permanente: el procesador está detenido (HALT).
+                    -- Solo una interrupción puede sacarlo de este estado.
                     null; -- processor stopped
 
                 when ESS_IDLE =>
