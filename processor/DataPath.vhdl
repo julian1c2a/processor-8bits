@@ -179,11 +179,6 @@ begin
             -- Usado por LD A,[nn], LD B,[nn], LD A,#n, LD B,#n, POP *, IN A,...
             when MEM_MDR_elected => Bus_Int <= MDR;       -- Dato de Memoria/IO (vía MDR)
 
-            -- Relleno por defecto: cuando Bus_Op no corresponde a ningún caso
-            -- semánticamente válido en el ciclo actual (p.ej. instrucciones ST
-            -- donde no se escribe en registros de datos).
-            when others => Bus_Int <= (others => '0');
-
             -- EA_LOW_elected: byte bajo (bits 7..0) del resultado de 16 bits del
             -- AddressPath (EA_In). Usado por ADD16/SUB16 para escribir el byte bajo
             -- en RegB (R1), y por ST SP_L para capturar el SP bajo en RegA.
@@ -193,6 +188,11 @@ begin
             -- Usado por ADD16/SUB16 para escribir el byte alto en RegA (R0),
             -- y por ST SP_H para capturar el SP alto en RegA.
             when EA_HIGH_elected  => Bus_Int <= EA_In(15 downto 8);
+
+            -- Relleno por defecto: cuando Bus_Op no corresponde a ningún caso
+            -- semánticamente válido en el ciclo actual (p.ej. instrucciones ST
+            -- donde no se escribe en registros de datos).
+            when others => Bus_Int <= (others => '0');
         end case;
     end process;
 

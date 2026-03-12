@@ -58,6 +58,10 @@ package ALU_pkg is
     -- Dirección sin signo de 16 bits: usada en el sumador EA y en el PC como entero.
     subtype unsigned_address_vector is unsigned(MSB_ADDRESS downto 0);
 
+    -- Dirección con signo de 16 bits: usada en el sumador EA para desplazamientos
+    -- relativos con signo (saltos relativos rel8 extendidos a 16 bits).
+    subtype signed_address_vector is signed(MSB_ADDRESS downto 0);
+
     -- Nibble sin signo de 4 bits: para calcular el carry del nibble bajo en half-carry.
     subtype unsigned_nibble is unsigned(MSB_NIBBLE downto 0);
 

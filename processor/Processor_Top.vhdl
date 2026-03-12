@@ -78,7 +78,7 @@ architecture Structural of Processor_Top is
     -- lo que puede causar comportamientos distintos según el orden de compilación.
     for all : DataPath_comp    use entity work.DataPath(unique);     -- Vincula DataPath_comp a la arquitectura 'unique' de DataPath
     for all : AddressPath_comp use entity work.AddressPath(unique);  -- Vincula AddressPath_comp a la arquitectura 'unique' de AddressPath
-    for all : ControlUnit_comp use entity work.ControlUnit(unique);  -- Vincula ControlUnit_comp a la arquitectura 'unique' de ControlUnit
+    for all : ControlUnit_comp use entity work.ControlUnit(pipeline);  -- Vincula ControlUnit_comp a la arquitectura 'pipeline' de ControlUnit
 
     -- =========================================================================
     -- Señales de Interconexión Interna
@@ -187,7 +187,7 @@ begin
             SP_Offset    => s_CtrlBus.SP_Offset,   -- '1' = AddressBus = SP+1 (acceso al byte alto de la palabra en pila, little-endian)
             Force_ZP     => s_CtrlBus.Force_ZP,    -- '1' = forzar MSB del AddressBus a 0x00 (wrapping a página cero)
             EA_A_Sel     => s_CtrlBus.EA_A_Sel,    -- Selecciona operando base del sumador EA: TMP / PC / A:B / SP
-            EA_B_Sel     => s_CtrlBus.EA_B_Sel     -- Selecciona operando índice del sumador EA: B / DataIn(signed) / TMP
+            EA_B_Sel     => s_CtrlBus.EA_B_Sel,    -- Selecciona operando índice del sumador EA: B / DataIn(signed) / TMP
             EA_Op        => s_CtrlBus.EA_Op         -- Operación del sumador EA: 0=ADD (EA=A+B), 1=SUB (EA=A-B)
         );
 
@@ -215,7 +215,11 @@ begin
             Flag_Mask  => s_CtrlBus.Flag_Mask, -- Máscara de bits: indica qué flags se actualizan (evita sobreescribir flags no afectados)
             MDR_WE     => s_CtrlBus.MDR_WE,    -- '1' = cargar el MDR desde MemData_In (captura el dato leído de memoria)
             ALU_Bin_Sel => s_CtrlBus.ALU_Bin_Sel, -- Selecciona la fuente del operando B de la ALU: Reg_B / MDR / inmediato / EA
-            Out_Sel    => s_CtrlBus.Out_Sel    -- Selecciona qué dato sale por MemDataOut: ACC / PC_low / PC_high / SP_low / SP_high
+            Out_Sel    => s_CtrlBus.Out_Sel,   -- Selecciona qué dato sale por MemDataOut: ACC / PC_low / PC_high / SP_low / SP_high
+            Load_F_Direct => s_CtrlBus.Load_F_Direct, -- '1'=carga F directamente desde bus interno (POP F, RTI)
+            EA_In      => s_AddressPath_EA,    -- Resultado EA de 16 bits desde AddressPath (ADD16/SUB16, ST SP_L/H)
+            EA_Flags_In => s_AddressPath_Flags, -- Flags C/Z del sumador EA (para Write_F tras ADD16/SUB16)
+            F_Src_Sel  => s_CtrlBus.F_Src_Sel  -- Selección fuente flags: 0=ALU, 1=AddressPath EA
         );
 
     -- ========================================================================

@@ -147,7 +147,7 @@ package body ALU_functions_pkg is
         --   El bit [8] de full9 es el carry-out de la suma de 8 bits.
         full9 := resize(get_sig_data(opA), full9'length)
                + resize(get_sig_data(opB), full9'length)
-               + resize(unsigned'('0' & cin), full9'length);
+               + signed(resize(unsigned'('0' & cin), full9'length));
         ret.acc := std_logic_vector(full9(MSB_DATA downto 0)); -- Resultado de 8 bits
 
         -- Flags base (Z, G, E se derivan de los operandos originales y el resultado)
@@ -208,7 +208,7 @@ package body ALU_functions_pkg is
         --   cin actúa como borrow-in para instrucciones SBB encadenadas.
         full9 := resize(get_sig_data(opA), full9'length)
                - resize(get_sig_data(opB), full9'length)
-               - resize(unsigned'('0' & cin), full9'length);
+               - signed(resize(unsigned'('0' & cin), full9'length));
         ret.acc := std_logic_vector(full9(MSB_DATA downto 0)); -- Resultado de 8 bits
 
         -- Flags base (Z, G, E se derivan de los operandos originales y el resultado)

@@ -154,7 +154,7 @@ begin
     --   EA_B_SRC_TMP:     TMP extendido con signo a 16 bits; para desplazamientos de 16 bits
     -- -----------------------------------------------------------------------
     with EA_B_Sel select EA_Adder_B_In <=
-        resize(unsigned(Index_B), 16)  when EA_B_SRC_REG_B,    -- Índice B sin signo [0..255]
+        signed(resize(unsigned(Index_B), 16))  when EA_B_SRC_REG_B,    -- Índice B sin signo [0..255]
         resize(signed(DataIn), 16)     when EA_B_SRC_DATA_IN,   -- Desplazamiento rel8 con signo [-128..+127]
         resize(signed(r_TMP), 16)      when EA_B_SRC_TMP,       -- Desplazamiento de 16 bits con signo
         (others => '0')                when others;              -- Caso seguro: índice = 0

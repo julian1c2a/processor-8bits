@@ -315,8 +315,6 @@ package ControlUnit_pkg is
         IO_WE       => '0', IO_RE  => '0'
     );
 
-end package ControlUnit_pkg;
-
     -- =========================================================================
     -- Declaración del componente ControlUnit
     -- =========================================================================
@@ -335,3 +333,5 @@ end package ControlUnit_pkg;
             CtrlBus  : out control_bus_t       -- Palabra de control generada para el ciclo actual
         );
     end component ControlUnit_comp;
+
+end package ControlUnit_pkg;

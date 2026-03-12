@@ -1,6 +1,7 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use work.CONSTANTS_pkg.ALL;
+use work.ALU_pkg.ALL;
 
 -- =========================================================================
 -- Paquete: AddressPath_pkg
