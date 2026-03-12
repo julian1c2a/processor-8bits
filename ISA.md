@@ -942,10 +942,10 @@ valor correcto del stack y el RAS se consumirá en orden).
 
 ---
 
-## 11. Ciclos de Bus — Estimación Revisada (v0.6)
+## 11. Ciclos de Bus — Estimación Revisada (v0.7)
 
-Modelo: PFQ 2 bytes, EA-adder solapado, PUSH/POP 16 bits, pipeline 2 etapas
-DECODE|EXEC+WB, especulación BRAM, BRAM TDP Port B = stack exclusivo (§10.7), LR (§10.8), RAS 4 entradas (§10.9).
+Modelo: PFQ 2 bytes, EA-adder solapado, PUSH/POP 16 bits, pipeline 4 etapas
+FETCH|DECODE|EXEC|WB, especulación BRAM, BRAM TDP Port B = stack exclusivo (§10.7), LR (§10.8), RAS 4 entradas (§10.9).
 
 | Instrucción        | Sin optim. | v0.4 | v0.5 | **v0.6** | Notas (v0.6)                                        |
 |--------------------|------------|------|------|----------|-----------------------------------------------------|
@@ -989,6 +989,7 @@ DECODE|EXEC+WB, especulación BRAM, BRAM TDP Port B = stack exclusivo (§10.7), 
 > Ciclos expresados en **ciclos de reloj** (1 ciclo = 1 período @ 450 MHz).
 > **v0.5** = pipeline DECODE|EXEC+WB + especulación BRAM (referencia anterior).
 > **v0.6** añade BRAM TDP Port B exclusivo (§10.7), BSR/LR (§10.8) y RAS (§10.9).
+> **v0.7** reestructura la UC en pipeline de 4 etapas FETCH|DECODE|EXEC|WB con registros IF/ID e ID/EX, stalls RAW y flush de saltos. Forwarding (→ v0.8).
 > TDP y especulación **no** aplican a SRAM externa ni bus I/O.
 > `RET` en 2 ciclos asume predicción RAS correcta (95%+ en código estructurado); peor caso = 3 ciclos.
 
@@ -1090,7 +1091,7 @@ isr:
 - [x] **Unidad de Control**: primera implementación basada en **microcode** (ROM de microinstrucciones). La opción hardwired queda como optimización futura opcional.
 - [x] **Instrucciones 16 bits (ADD16/SUB16)**: opcodes `0xE0`–`0xE3`; aritmética de punteros sobre A:B reutilizando el sumador EA. `#n` sign-extendido (4 ciclos), `#nn` literal (6 ciclos). Flags C, V, Z de 16 bits. Ver §7.11.
 - [x] **Doble datapath interno (ABUS/DBUS separados)**: ADDRESS PATH de 16 bits (PC, SP, EAR, EA-adder) y DATA PATH de 8 bits (A, B, ALU, MDR) son completamente independientes. La UC los controla mediante campos ortogonales en la microinstrucción. Permite paralelismo address+data en PUSH/CALL/LD indexado. Ver §10.0.
-- [x] **Pipeline 2 etapas (DECODE | EXEC+WB)**: DATA PATH dividido en dos etapas con registro de pipeline. Habilita forwarding bypass (sin stalls en secuencias RAW de registros). Prerrequisito para la especulación de dirección BRAM. Ver §10.5.
+- [x] **Pipeline 4 etapas (FETCH | DECODE | EXEC | WB)**: UC reestructurada con registros de pipeline IF/ID e ID/EX (`Pipeline_pkg.vhdl`). Solapamiento FETCH+EXEC para instrucciones ALU de 1 ciclo. Detección de hazards RAW con stalls; forwarding planificado para v0.8. Flush de pipeline en saltos tomados. Ver §10.5.
 - [x] **Especulación de dirección BRAM**: el ADDRESS PATH emite la dirección al RAMB18 al final de DECODE para modos `[n]`, `[B]`, stack, `[nn]`, `[nn+B]`. BRAM responde en EXEC+WB → −2 ciclos en todos los accesos a página cero, stack y memoria absoluta respecto a v0.4. No aplica a SRAM externa ni bus I/O. Ver §10.6.
 - [x] **BRAM True Dual-Port (TDP)**: Port B exclusivo para la pila; Port A para programa/datos/página-cero. Las señales `STK_WE`, `STK_RE`, `STK_ADDR_SEL` son ortogonales a `MEM_WE`/`MEM_RE`/`ABUS_SEL`. `CALL nn` → 4 ciclos, `CALL ([nn])` → 6 ciclos, `RET` → 2 ciclos. Ver §10.7.
 - [x] **BSR rel8** (opcode `0xF0`): CALL relativo de 2 bytes, 3 ciclos. Target y dirección de retorno calculados al final de DECODE mediante el sumador EA; push vía TDP Port B. Actualiza LR. Ideal para funciones dentro de ±127 bytes. Ver §10.8.
@@ -1099,9 +1100,14 @@ isr:
 
 ### Descartadas
 
-- [~] **Pipeline 3 etapas (FETCH|DECODE|EXEC|WB)**: requiere hazard unit completa incompatible con microcode; la ganancia marginal de throughput (≤15% sobre el diseño de 2 etapas) no justifica abandonar el microcode ni la complejidad añadida.
+- [~] **Pipeline 3 etapas**: la ganancia marginal sobre 2 etapas no justificaba la complejidad. Se implementó directamente el pipeline de 4 etapas (v0.7).
+- [~] **Unidad de Control basada en microcode (ROM)**: se optó por hardwired FSM+pipeline para mayor frecuencia y menor latencia de decodificación. El microcode queda como alternativa futura opcional.
 
 ### Pendientes
 
-- [ ] **Implementación microcode**: diseño del *datapath* VHDL completo (señales de control de ambas etapas, ancho de la palabra de microinstrucción, secuenciador de estados). Incluye señales TDP (`STK_WE`/`STK_RE`/`STK_ADDR_SEL`), LR, RAS, BSR, codificación `0xF0`/`0xF1`/`0xF2`; además de PFQ flush, solapamiento EA, forwarding bypass, especulación BRAM y wait states SRAM.
-- [ ] **PUSH LR / POP LR**: opcodes provisionales `0x68`/`0x69`. Añadir a §7.3 (stack), §8 (flags), §9 (mapa de opcodes) y §11 (ciclos) cuando se confirme la codificación definitiva.
+- [ ] **Forwarding / Bypassing** (v0.8): bypass EX→EX y MEM→EX para eliminar stalls RAW. Actualmente se insertan stalls de 1 ciclo por dependencia.
+- [ ] **Especulación de dirección BRAM**: emitir dirección al RAMB18 en el último ciclo de DECODE para modos `[n]`, `[B]`, stack. Ver §10.6.
+- [ ] **BRAM True Dual-Port (TDP)**: Port B exclusivo para la pila. Señales `STK_WE`/`STK_RE`/`STK_ADDR_SEL` ortogonales a `MEM_WE`/`MEM_RE`. Ver §10.7.
+- [ ] **BSR rel8 / RET LR / CALL LR, nn**: cablear `Load_LR` en la UC pipeline. Codificaciones `0xF0`/`0xF1`/`0xF2`. Ver §10.8.
+- [ ] **Return Address Stack (RAS)**: pila hardware de 4 entradas para predicción especulativa de `RET`. Ver §10.9.
+- [ ] **PUSH LR / POP LR**: opcodes provisionales `0x68`/`0x69`. Añadir a §7.3, §8, §9 y §11 cuando se confirme la codificación definitiva.

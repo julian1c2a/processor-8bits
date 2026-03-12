@@ -4,14 +4,14 @@ Implementación de un procesador de 8 bits con una arquitectura de conjunto de i
 
 El diseño sigue las mejores prácticas de la industria, incluyendo una arquitectura de doble datapath, pipeline, y un sistema de paquetes VHDL modular y parametrizable para facilitar el mantenimiento y la escalabilidad.
 
-## Características de la Arquitectura (ISA v0.6)
+## Características de la Arquitectura (ISA v0.7)
 
 * **Arquitectura Acumulador:** El registro `A` (R0) actúa como operando principal y destino.
 * **Banco de Registros:** 8 registros de 8 bits de propósito general (R0-R7).
 * **Doble Datapath:**
   * **Data Path (8 bits):** Gestiona la ALU y el banco de registros.
   * **Address Path (16 bits):** Gestiona el PC, SP y el cálculo de direcciones efectivas.
-* **Pipeline de 2 Etapas:** `DECODE | EXEC+WB` con forwarding para minimizar stalls.
+* **Pipeline de 4 Etapas:** `FETCH | DECODE | EXEC | WB` con detección de hazards RAW y stalls. Forwarding planificado para v0.8.
 * **Especulación de Dirección:** Optimización para accesos a BRAM (memoria interna de la FPGA).
 * **Stack de 16 bits:** Operaciones `PUSH`/`POP` de palabra completa para mayor eficiencia.
 * **Frecuencia Objetivo:** 450 MHz en dispositivos Artix-7 (Nexys 7 100T).
@@ -20,18 +20,20 @@ El diseño sigue las mejores prácticas de la industria, incluyendo una arquitec
 
 ## Estado Actual de la Implementación
 
-La implementación VHDL actual ha completado la infraestructura hardware principal (DataPath, AddressPath, ALU) y una Unidad de Control multiciclo funcional que soporta un subconjunto significativo de la ISA, incluyendo:
+La implementación VHDL actual (v0.7) incluye la infraestructura hardware completa (DataPath, AddressPath, ALU) y una Unidad de Control con **pipeline de 4 etapas** que cubre toda la ISA:
 
 * **Carga/Almacenamiento:** Registros (A, B), Inmediato (#n), Absoluto ([nn]), Página Cero ([n]), Indexado ([nn+B]) e Indirecto ([B]).
+* **Operaciones ALU:** Aritméticas (ADD, SUB, ADC, SBB), Lógicas (AND, OR, XOR, NOT), Comparación (CMP), Incremento/Decremento (INC, DEC, INC B, DEC B), Negación (NEG), Desplazamientos y Rotaciones, Multiplicación.
+* **Flujo de Control:** Saltos incondicionales (JP nn, JR rel8, JPN, JP A:B, JP([nn])) y toda la familia de saltos condicionales (BEQ, BNE, BCS, BCC, BVS, BVC, BGT, BLE, BGE, BLT, BHC, BEQ2).
+* **Pila (Stack):** PUSH/POP de registros (A, B, F) y pares (A:B).
+* **Subrutinas:** `CALL nn`, `CALL([nn])`, `RET`.
+* **Interrupciones:** `IRQ`, `NMI`, `RTI`, `SEI`, `CLI`.
+* **E/S:** `IN`/`OUT` con direccionamiento inmediato e indirecto.
+* **Aritmética 16 bits:** `ADD16`/`SUB16` con operando inmediato de 8 o 16 bits.
+* **Pipeline:** Registros IF/ID e ID/EX explícitos (`Pipeline_pkg.vhdl`), solapamiento FETCH+EXEC para instrucciones de 1 ciclo, stalls RAW, flush en saltos.
 
-- **Operaciones ALU:** Aritméticas (ADD, SUB), Lógicas (AND, OR, XOR), Comparación (CMP), Incremento/Decremento (INC, DEC), Negación (NEG) y Desplazamientos/Rotaciones.
+Las optimizaciones avanzadas (forwarding, TDP stack, BSR/RET LR, RAS) están planificadas para v0.8+
 
-* **Flujo de Control:** Saltos incondicionales (JP) y toda la familia de saltos condicionales relativos (BEQ, BNE, BCS, etc.).
-* **Pila (Stack):** Soporte completo para PUSH/POP de registros (A, B, F) y pares (A:B).
-* **Subrutinas:** Implementación completa de `CALL nn` y `RET`.
-* **E/S:** Instrucciones `IN` y `OUT` con direccionamiento inmediato e indirecto.
-
-Las características más avanzadas de la ISA v0.6 (pipeline, BSR, RAS, etc.) están definidas como el objetivo final, pero aún no están implementadas en la Unidad de Control actual
 ---
 
 ## Documentación de la Arquitectura
