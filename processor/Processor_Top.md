@@ -1,39 +1,71 @@
 # Processor Top Level
 
-La entidad `Processor_Top` integra los subsistemas principales para formar el núcleo completo del procesador. Implementa la arquitectura de **Doble Datapath** descrita en la ISA v0.6.
+La entidad `Processor_Top` integra los subsistemas principales para formar el núcleo completo del procesador. Implementa la arquitectura de **Doble Datapath** con **pipeline de 4 etapas** descrita en la ISA v0.7.
+
+## Archivos relevantes
+
+| Archivo | Descripción |
+|---|---|
+| `processor/Processor_Top.vhdl` | Top level estructural |
+| `processor/ControlUnit.vhdl` | Unidad de Control — pipeline de 4 etapas |
+| `processor/Pipeline_pkg.vhdl` | Tipos de registros de pipeline (IF/ID, ID/EX) |
+| `processor/ControlUnit_pkg.vhdl` | Tipo `control_bus_t` y constante `INIT_CTRL_BUS` |
+| `processor/DataPath.vhdl` | Data Path de 8 bits |
+| `processor/AddressPath.vhdl` | Address Path de 16 bits |
 
 ## Estructura del Sistema
 
-El diseño separa limpiamente el flujo de datos (8 bits) del flujo de control/direcciones (16 bits), orquestados por una Unidad de Control central.
+El diseño separa limpiamente el flujo de datos (8 bits) del flujo de control/direcciones (16 bits), orquestados por una Unidad de Control con pipeline de 4 etapas.
 
 ### Jerarquía
 
-* **Processor_Top**
-  * `ControlUnit` (Cerebro): Genera señales de control basadas en instrucciones y flags.
-  * `AddressPath` (Direcciones 16-bit): Gestiona PC, SP y direccionamiento.
-  * `DataPath` (Datos 8-bit): Gestiona ALU y registros generales.
+```text
+Processor_Top (Structural)
+├── ControlUnit   — pipeline FETCH|DECODE|EXEC|WB; usa Pipeline_pkg
+├── AddressPath   — PC, SP, LR, EAR, TMP; sumador EA 16-bit
+└── DataPath      — banco registros 8×8, ALU, MDR, flags
+```
 
 ## Interconexión Interna
 
-1. **Bus de Control (`CtrlBus`):** Un registro (record) masivo que transporta todas las micro-órdenes desde la UC hacia los dataregions. Definido en `ControlUnit_pkg`.
-2. **Flags (`s_Flags`):** Feedback desde el DataPath (ALU) hacia la UC para la toma de decisiones (saltos condicionales).
-3. **Índice B (`s_DataPath_IndexB`):** Conexión directa desde el registro B del DataPath hacia el sumador EA del AddressPath para permitir direccionamiento indexado (`[nn+B]`).
-4. **PC (`s_AddressPath_PC`):** Conexión desde el PC del AddressPath hacia el DataPath para permitir guardar la dirección de retorno en la pila (`PUSH PC` durante `CALL`).
+| Señal interna | De → A | Descripción |
+|---|---|---|
+| `s_CtrlBus` | ControlUnit → DataPath, AddressPath | Palabra de control completa (`control_bus_t`): ~30 campos ortogonales |
+| `s_Flags` | DataPath → ControlUnit | Registro F (C,H,V,Z,G,E,R,L) para saltos condicionales |
+| `s_DataPath_IndexB` | DataPath → AddressPath | Valor de R1 (B) para modos indexados `[nn+B]` y `[B]` |
+| `s_DataPath_RegA` | DataPath → AddressPath | Valor de R0 (A) para operaciones 16-bit (`A:B`) |
+| `s_AddressPath_PC` | AddressPath → DataPath | PC actual para `OUT_SEL_PCL`/`PCH` en `CALL` (push retorno) |
+| `s_AddressPath_EA` | AddressPath → DataPath | Resultado del sumador EA para `ADD16`/`SUB16` y `ST SP` |
+| `s_AddressPath_Flags` | AddressPath → DataPath | Flags de 16 bits (C,Z) para instrucciones `ADD16`/`SUB16` |
+
+El bus de datos externo `MemData_In` llega simultáneamente a `ControlUnit.InstrIn`, `AddressPath.DataIn` y `DataPath.MemDataIn`. En el pipeline v0.7, la UC selecciona cuándo ese dato es un opcode (etapa FETCH) o un operando (etapa DECODE/EXEC) mediante los registros IF/ID e ID/EX.
 
 ## Interfaz Externa
 
-| Puerto | Tipo | Descripción |
-|---|---|---|
-| `clk`, `reset` | Entrada | Reloj del sistema y reinicio global (activo alto). |
-| `MemAddress` | Salida (16b) | Dirección de memoria física. |
-| `MemData_In` | Entrada (8b) | Bus de lectura de memoria. |
-| `MemData_Out` | Salida (8b) | Bus de escritura de memoria. |
-| `Mem_WE` / `RE` | Salida (1b) | Control de escritura/lectura de memoria. |
-| `IO_WE` / `RE` | Salida (1b) | Control para espacio de I/O (puertos). |
+| Puerto | Dir | Ancho | Descripción |
+| --- | --- | --- | --- |
+| `clk` | IN | 1 | Reloj del sistema |
+| `reset` | IN | 1 | Reset global síncrono (activo alto) |
+| `MemAddress` | OUT | 16 | Dirección al bus de memoria |
+| `MemData_In` | IN | 8 | Dato leído de memoria (opcode u operando) |
+| `MemData_Out` | OUT | 8 | Dato a escribir en memoria (`ST`, `PUSH`, `CALL`) |
+| `Mem_WE` | OUT | 1 | Write enable memoria |
+| `Mem_RE` | OUT | 1 | Read enable memoria |
+| `Mem_Ready` | IN | 1 | Handshake: `1` = dato válido / escritura aceptada (wait states) |
+| `IO_WE` | OUT | 1 | Write enable espacio I/O |
+| `IO_RE` | OUT | 1 | Read enable espacio I/O |
+| `IRQ` | IN | 1 | Interrupt Request (enmascarable, flag `I`) |
+| `NMI` | IN | 1 | Non-Maskable Interrupt (prioridad máxima) |
 
 ## Mapa de Memoria (Resumen)
 
-* `0x0000 - 0xFFFF`: Espacio de direccionamiento de 64KB.
-* I/O mapeado independientemente (instrucciones `IN`/`OUT`).
-* Stack: Crecimiento descendente, inicializado típicamente en `0xFFFE`.
-* Vector de Reset: `0x0000`.
+| Rango | Uso |
+|---|---|
+| `0x0000` | Vector de reset (ejecución comienza aquí) |
+| `0x0001–0xFF` | Página cero (acceso rápido con `[n]`) |
+| `0x0100–0xFFF9` | Memoria general de programa/datos |
+| `0xFFFA–0xFFFB` | Vector NMI (low, high) |
+| `0xFFFC–0xFFFD` | Reservado |
+| `0xFFFE–0xFFFF` | Vector IRQ (low, high); SP inicial = `0xFFFE` |
+
+El espacio I/O (256 puertos) es independiente del mapa de memoria y se accede exclusivamente con `IN`/`OUT`.
