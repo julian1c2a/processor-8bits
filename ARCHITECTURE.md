@@ -57,22 +57,22 @@ Para instrucciones multi-ciclo (ej. `LD [nn],A` = 4 ciclos), la UC inserta burbu
 
 ```
                  ┌──────────────────────────────────────────────────┐
-MemData_In  ────►│ ControlUnit                                       │
-                 │  ├ IF/ID reg                                       │
-                 │  ├ ID/EX reg  (ctrl, opcode, op1, op2, hazard)    │
-                 │  ├ DSS FSM   → controla fetch de operandos        │
-                 │  └ ESS FSM   → emite control_bus_t multi-ciclo    │
-                 │            ↓ s_CtrlBus (control_bus_t)            │
+MemData_In  ────►│ ControlUnit                                      │
+                 │  ├ IF/ID reg                                     │
+                 │  ├ ID/EX reg  (ctrl, opcode, op1, op2, hazard)   │
+                 │  ├ DSS FSM   → controla fetch de operandos       │
+                 │  └ ESS FSM   → emite control_bus_t multi-ciclo   │
+                 │            ↓ s_CtrlBus (control_bus_t)           │
                  └──────────────────────────────────────────────────┘
                               │                    │
                               ▼                    ▼
               ┌───────────────────┐   ┌────────────────────────┐
               │    DataPath       │   │    AddressPath         │
-              │  ┌─ BancoReg 8×8 │   │  ┌─ PC (16b)          │
-              │  ├─ ALU  8b      │   │  ├─ SP (16b)          │
-              │  ├─ MDR          │   │  ├─ EAR (16b)         │
-              │  └─ RegF (flags) │   │  ├─ TMP (16b)         │
-              └───────┬───────────┘   │  └─ EA Adder (16b)   │
+              │  ┌─ BancoReg 8×8  │   │  ┌─ PC (16b)           │
+              │  ├─ ALU  8b       │   │  ├─ SP (16b)           │
+              │  ├─ MDR           │   │  ├─ EAR (16b)          │
+              │  └─ RegF (flags)  │   │  ├─ TMP (16b)          │
+              └───────┬───────────┘   │  └─ EA Adder (16b)     │
                       │               └────────────┬───────────┘
                       │ s_Flags                    │ s_AddressPath_EA
                       └────────────────────────────┘
