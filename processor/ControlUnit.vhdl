@@ -477,9 +477,6 @@ begin
                         r_exec_op1 <= r_ID_EX.op1;
                         r_exec_op2 <= r_ID_EX.op2;
                         r_ID_EX    <= NOP_ID_EX;
-                        report "DBG ESS_DISPATCH: opcode=0x" & to_hstring(r_ID_EX.opcode) &
-                               " op1=0x" & to_hstring(r_ID_EX.op1) &
-                               " op2=0x" & to_hstring(r_ID_EX.op2) severity note;
 
                         -- Choose first ESS state from opcode
                         case r_ID_EX.opcode is
@@ -930,8 +927,6 @@ begin
                                             reads_a=>'0', reads_b=>'0',
                                             is_single=>'0', is_multi=>'0');
                                         dss <= DSS_OP2;
-                                        report "DBG DSS_OP1->OP2: opcode=0x" & to_hstring(r_IF_ID.opcode) &
-                                               " op1=0x" & to_hstring(InstrIn) severity note;
                                         -- Keep r_IF_ID valid for opcode reference
                                 end case;
 
@@ -950,9 +945,6 @@ begin
                                     is_single=>'0', is_multi=>'1');
                                 r_IF_ID <= NOP_IF_ID;
                                 dss <= DSS_OPCODE;
-                                report "DBG DSS_OP2: opcode=0x" & to_hstring(r_IF_ID.opcode) &
-                                       " op1=0x" & to_hstring(r_ID_EX.op1) &
-                                       " op2=0x" & to_hstring(InstrIn) severity note;
 
                             when others => null;
                         end case;

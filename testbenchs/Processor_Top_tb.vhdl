@@ -169,24 +169,6 @@ begin
     end process;
 
     -- =========================================================================
-    -- Monitor de debug: imprime ADDR+DATA cada ciclo en rango 85..135 (TB-01)
-    -- =========================================================================
-    debug_proc: process
-        variable cycle_cnt : integer := 0;
-    begin
-        wait until rising_edge(clk);
-        cycle_cnt := cycle_cnt + 1;
-        if cycle_cnt >= 1 and cycle_cnt <= 400 then
-            report "DBG clk=" & integer'image(cycle_cnt) &
-                   " ADDR=" & to_hstring(MemAddress) &
-                   " DIN="  & to_hstring(MemData_In)  &
-                   " RE="   & std_logic'image(Mem_RE)  &
-                   " WE="   & std_logic'image(Mem_WE)  &
-                   " halt=" & std_logic'image(halt_detect);
-        end if;
-    end process debug_proc;
-
-    -- =========================================================================
     -- Inicialización de RAM y proceso de estímulos
     -- =========================================================================
     stim_proc: process
@@ -811,14 +793,14 @@ begin
             RAM(16#FFFE#) := x"50"; RAM(16#FFFF#) := x"00";
             -- vector NMI @ 0xFFFA:0xFFFB = 0x0060 (little-endian)
             RAM(16#FFFA#) := x"60"; RAM(16#FFFB#) := x"00";
-            -- Programa principal: SEI + bucle NOP (10 NOPs) + HALT
-            RAM(16#0000#) := x"04";                          -- SEI (habilitar IRQ)
-            -- 10 NOPs para dar tiempo a la interrupción
-            -- 0x0001..0x000A: NOP×10
-            for i in 0 to 9 loop
-                RAM(16#0001# + i) := x"00";
-            end loop;
-            RAM(16#000B#) := x"01";                          -- HALT
+            -- Programa principal: LD SP,#0x01FF + SEI + HALT
+            -- LD SP mueve el puntero de pila lejos del vector table (0xFFFA-0xFFFF)
+            -- para que el PUSH durante la ISR no sobreescriba los vectores de interrupción.
+            RAM(16#0000#) := x"50"; RAM(16#0001#) := x"FF"; RAM(16#0002#) := x"01"; -- LD SP,#0x01FF
+            RAM(16#0003#) := x"04";                          -- SEI (habilitar IRQ)
+            RAM(16#0004#) := x"01";                          -- HALT (espera primera ISR)
+            RAM(16#0005#) := x"01";                          -- HALT (retorno tras ISR1, espera segunda ISR)
+            RAM(16#0006#) := x"01";                          -- HALT (retorno tras ISR2, fin)
             -- Handler IRQ @ 0x0050: INC [0x0100]; RTI
             RAM(16#0050#) := x"13"; RAM(16#0051#) := x"00"; RAM(16#0052#) := x"01"; -- LD A,[0x0100]
             RAM(16#0053#) := x"C2";                          -- INC A
@@ -861,9 +843,6 @@ begin
 
         -- Esperar un delta cycle para que las asignaciones de RAM se apliquen
         wait for 0 ns;
-        report "DBG RAM[0x0000]=0x" & to_hstring(RAM(16#0000#)) &
-               " RAM[0x0001]=0x" & to_hstring(RAM(16#0001#)) &
-               " (programa cargado)";
 
         -- ---------------------------------------------------------------
         -- Reset inicial
