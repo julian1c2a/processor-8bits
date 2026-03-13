@@ -11,15 +11,11 @@ build/
 *~*
 .*/
 testbenchs/vectors/
-build/
 import_synplify_summary.txt
-processor-8bits.xpr
-processor-8bits.cache/
-processor-8bits.hw/
-processor-8bits.srcs
-processor-8bits.srcs/
-processor-8bits.srcs/*
-processor-8bits.srcs/*/*
-processor-8bits.srcs/*/*/*
-processor-8bits.srcs/*/*/*/*
-processor-8bits.srcs/*/*/*/*/*
+
+# Vivado — directorios de proyecto
+processor-8bits.*/
+
+# Python
+__pycache__/
+*.py[cod]
