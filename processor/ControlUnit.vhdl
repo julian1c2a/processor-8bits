@@ -191,6 +191,8 @@ architecture pipeline of ControlUnit is
             when x"95" => c.ALU_Op := OP_IOR; c.Flag_Mask := x"1C";
             when x"96" => c.ALU_Op := OP_XOR; c.Flag_Mask := x"1C";
             when x"97" => c.ALU_Op := OP_CMP; c.Flag_Mask := x"FF"; c.Write_A := '0';
+            when x"98" => c.ALU_Op := OP_MUL; c.Flag_Mask := x"FF";
+            when x"99" => c.ALU_Op := OP_MUH; c.Flag_Mask := x"FF";
             when others => null;
         end case;
         return c;
@@ -244,8 +246,8 @@ architecture pipeline of ControlUnit is
             when x"C9" => c.ALU_Op := OP_LSR; c.Flag_Mask := x"12";
             when x"CA" => c.ALU_Op := OP_ASL; c.Flag_Mask := x"31";
             when x"CB" => c.ALU_Op := OP_ASR; c.Flag_Mask := x"12";
-            when x"CC" => c.ALU_Op := OP_ROL; c.Flag_Mask := x"10";
-            when x"CD" => c.ALU_Op := OP_ROR; c.Flag_Mask := x"10";
+            when x"CC" => c.ALU_Op := OP_ROL; c.Flag_Mask := x"90"; -- C(bit7)+Z(bit4)
+            when x"CD" => c.ALU_Op := OP_ROR; c.Flag_Mask := x"90"; -- C(bit7)+Z(bit4)
             when x"CE" => c.ALU_Op := OP_SWP; c.Flag_Mask := x"10";
             when others => null;
         end case;
@@ -388,7 +390,7 @@ begin
                     -- Carga/lectura del Stack Pointer
                     when ESS_LDSP_1  => ess <= ESS_LDSP_2;
                     when ESS_LDSP_2  => ess <= ESS_IDLE;
-                    when ESS_LDSP_AB => ess <= ESS_IDLE;
+                    when ESS_LDSP_AB => ess <= ESS_LDSP_2;  -- LD SP,A:B: next cycle loads SP from EA=A:B
                     when ESS_STSP_WB => ess <= ESS_IDLE;    -- byte del SP ya en A
 
                     -- Operaciones de E/S (IN / OUT)
@@ -422,6 +424,10 @@ begin
                             -- 2-byte I/O immediate: TMP_L=port, TMP_H=0; dispatch to I/O.
                             when x"D0"                   => ess <= ESS_IN_READ;
                             when x"D2"                   => ess <= ESS_OUT_WRITE;
+                            -- JPN (2-byte): TMP_L ya cargado → salto directo página cero.
+                            when x"72"                   => ess <= ESS_JPN_2;
+                            -- ADD16/SUB16 #n (2-byte): TMP_L=op1, TMP_H=0 → WB1.
+                            when x"E0"|x"E2"             => ess <= ESS_OP16_WB1;
                             -- All 3-byte ops: also need TMP_H from r_exec_op2
                             when others                  => ess <= ESS_TMP_FROM_OP2;
                         end case;
@@ -461,6 +467,9 @@ begin
                         r_exec_op1 <= r_ID_EX.op1;
                         r_exec_op2 <= r_ID_EX.op2;
                         r_ID_EX    <= NOP_ID_EX;
+                        report "DBG ESS_DISPATCH: opcode=0x" & to_hstring(r_ID_EX.opcode) &
+                               " op1=0x" & to_hstring(r_ID_EX.op1) &
+                               " op2=0x" & to_hstring(r_ID_EX.op2) severity note;
 
                         -- Choose first ESS state from opcode
                         case r_ID_EX.opcode is
@@ -491,7 +500,7 @@ begin
                                 else
                                     ess <= ESS_SKIP_BYTE;
                                 end if;
-                            when x"72"             => ess <= ESS_JPN_2;
+                            when x"72"             => ess <= ESS_TMP_FROM_OP1; -- JPN: carga TMP_L desde r_exec_op1
                             when x"73"             => ess <= ESS_IND_LOAD;
                             when x"74"             => ess <= ESS_JP_AB;
                             -- CALL nn / BSR nn (3-byte): op1=addr_L, op2=addr_H.
@@ -512,11 +521,10 @@ begin
                             when x"52"|x"53"             => ess <= ESS_STSP_WB;
                             when x"60"|x"61"|x"62"|x"63" => ess <= ESS_PUSH_1;
                             when x"64"|x"65"|x"66"|x"67" => ess <= ESS_POP_1;
-                            -- ADD16/SUB16 #n (2-byte IMM8): op1 = imm byte.
-                            when x"E0"|x"E2"             => ess <= ESS_OP16_IMM8;
-                            -- ADD16/SUB16 #nn (3-byte): op1=low, op2=high.
-                            -- Load TMP from ops, then ESS_TMP_FROM_OP2 → ESS_OP16_WB1.
-                            when x"E1"|x"E3"             => ess <= ESS_TMP_FROM_OP1;
+                            -- ADD16/SUB16 #n (2-byte IMM8): op1 = imm byte → TMP_L, TMP_H=0.
+                            -- ADD16/SUB16 #nn (3-byte): op1=low, op2=high → TMP.
+                            -- Both routes through ESS_TMP_FROM_OP1 → ESS_OP16_WB1.
+                            when x"E0"|x"E1"|x"E2"|x"E3" => ess <= ESS_TMP_FROM_OP1;
                             when others            => ess <= ESS_IDLE;
                         end case;
 
@@ -690,6 +698,16 @@ begin
                                             is_single=>'1', is_multi=>'0');
                                         r_IF_ID <= NOP_IF_ID;
 
+                                    -- MUL/MUH (0x98..0x99): single-cycle, A = A×B low/high
+                                    when x"98"|x"99" =>
+                                        v_c := build_alu_reg(r_IF_ID.opcode);
+                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
+                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
+                                            writes_a=>'1', writes_b=>'0',
+                                            reads_a=>'1', reads_b=>'1',
+                                            is_single=>'1', is_multi=>'0');
+                                        r_IF_ID <= NOP_IF_ID;
+
                                     -- ALU unary ops (0xC0..0xCE): single-cycle
                                     when x"C0"|x"C1"|x"C2"|x"C3"|x"C4"|x"C5"|x"C6"|x"C7"|
                                          x"C8"|x"C9"|x"CA"|x"CB"|x"CC"|x"CD"|x"CE" =>
@@ -777,8 +795,8 @@ begin
                                         r_IF_ID <= NOP_IF_ID;
 
                                     -- Conditional branches & JR (0x71, 0x80..0x8B): 2-byte multi
-                                    -- JPN (0x72): 2-byte multi
-                                    when x"71"|x"72"|
+                                    -- offset se recupera desde DATA_IN en ESS_BRANCH_2
+                                    when x"71"|
                                          x"80"|x"81"|x"82"|x"83"|x"84"|x"85"|
                                          x"86"|x"87"|x"88"|x"89"|x"8A"|x"8B" =>
                                         r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
@@ -787,6 +805,11 @@ begin
                                             reads_a=>'0', reads_b=>'0',
                                             is_single=>'0', is_multi=>'1');
                                         r_IF_ID <= NOP_IF_ID;
+
+                                    -- JPN (0x72): 2-byte multi, op1 = destino página cero
+                                    when x"72" =>
+                                        dss <= DSS_OP1;
+                                        -- Hold r_IF_ID (keep opcode=0x72), operand arrives in DSS_OP1
 
                                     -- =========================================
                                     -- 2-byte instructions: fetch OP1 via dss
@@ -835,7 +858,7 @@ begin
                                     -- LD A,#n
                                     when x"11" =>
                                         v_c := INIT_CTRL_BUS;
-                                        v_c.MDR_WE  := '1'; -- operand was latched by fetch
+                                        -- MDR_WE already applied in comb_proc DSS_OP1 cycle
                                         v_c.Bus_Op  := MEM_MDR_elected;
                                         v_c.Write_A := '1';
                                         v_c.Write_F := '1';
@@ -851,7 +874,7 @@ begin
                                     -- LD B,#n
                                     when x"21" =>
                                         v_c := INIT_CTRL_BUS;
-                                        v_c.MDR_WE  := '1';
+                                        -- MDR_WE already applied in comb_proc DSS_OP1 cycle
                                         v_c.Bus_Op  := MEM_MDR_elected;
                                         v_c.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
                                         v_c.Write_B := '1';
@@ -866,7 +889,7 @@ begin
                                     -- ALU immediate: MDR has the operand byte
                                     when x"A0"|x"A1"|x"A2"|x"A3"|x"A4"|x"A5"|x"A6"|x"A7" =>
                                         v_c := build_alu_imm(r_IF_ID.opcode);
-                                        v_c.MDR_WE := '1'; -- latch immediate into MDR
+                                        -- MDR_WE already applied in comb_proc DSS_OP1 cycle
                                         r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
                                             op1=>InstrIn, op2=>x"00", ctrl=>v_c,
                                             writes_a=>v_c.Write_A, writes_b=>'0',
@@ -897,6 +920,8 @@ begin
                                             reads_a=>'0', reads_b=>'0',
                                             is_single=>'0', is_multi=>'0');
                                         dss <= DSS_OP2;
+                                        report "DBG DSS_OP1->OP2: opcode=0x" & to_hstring(r_IF_ID.opcode) &
+                                               " op1=0x" & to_hstring(InstrIn) severity note;
                                         -- Keep r_IF_ID valid for opcode reference
                                 end case;
 
@@ -915,6 +940,9 @@ begin
                                     is_single=>'0', is_multi=>'1');
                                 r_IF_ID <= NOP_IF_ID;
                                 dss <= DSS_OPCODE;
+                                report "DBG DSS_OP2: opcode=0x" & to_hstring(r_IF_ID.opcode) &
+                                       " op1=0x" & to_hstring(r_ID_EX.op1) &
+                                       " op2=0x" & to_hstring(InstrIn) severity note;
 
                             when others => null;
                         end case;
@@ -1084,6 +1112,8 @@ begin
                     -- Ciclo 3/3: escribe el byte alto en mem[SP+1].
                     -- Para PUSH A:B escribe A; para PUSH A/B/F escribe 0x00 (relleno).
                     v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.SP_Offset := '1';
+                    v_ctrl.Mem_WE    := '1';
                     if r_exec_IR = x"63" then v_ctrl.Out_Sel := OUT_SEL_A;
                     else                       v_ctrl.Out_Sel := OUT_SEL_ZERO; end if;
                     v_needs_mem := true;
@@ -1135,8 +1165,13 @@ begin
                 when ESS_CALL_1 =>
                     -- Ciclo 1/6: lee el byte bajo de la dirección destino [PC] → TMP_L; PC++.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_L := '1';
+                    v_ctrl.PC_Op      := PC_OP_INC;
+                    v_needs_mem := true;
+
+                when ESS_CALL_2 =>
                     -- Ciclo 2/6: lee el byte alto de la dirección destino [PC] → TMP_H; PC++.
-                    -- Al finalizar TMP tiene la dirección completa de la rutina.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
                     v_ctrl.Mem_RE     := '1';
                     v_ctrl.Load_TMP_H := '1';
@@ -1171,11 +1206,23 @@ begin
                     v_ctrl.PC_Op        := PC_OP_LOAD;
 
                 when ESS_RET_1 =>
-                    -- Ciclo 1/3: lee la dirección de retorno byte bajo desde mem[SP] → TMP_L.
+                    -- Ciclo 1/3: lee el byte bajo de la dirección de retorno desde mem[SP] → TMP_L.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
-                    -- Ciclo 2/3: lee la dirección de retorno byte alto desde mem[SP+1] → TMP_H.
+                    v_ctrl.SP_Offset  := '0';
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_L := '1';
+                    v_needs_mem := true;
+
+                when ESS_RET_2 =>
+                    -- Ciclo 2/3: lee el byte alto de la dirección de retorno desde mem[SP+1] → TMP_H.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
-                    -- Ciclo 3/3: PC ← TMP (retorno); SP += 2 (libera trama de 2 bytes del stack).
+                    v_ctrl.SP_Offset  := '1';
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_H := '1';
+                    v_needs_mem := true;
+
+                when ESS_RET_3 =>
+                    -- Ciclo 3/3: PC ← TMP (retorno); SP += 2 (libera los 2 bytes del stack).
                     v_ctrl.Load_Src_Sel := '1'; -- TMP
                     v_ctrl.PC_Op        := PC_OP_LOAD;
                     v_ctrl.SP_Op        := SP_OP_INC;
@@ -1195,10 +1242,15 @@ begin
                     v_ctrl.SP_Op         := SP_OP_INC;
 
                 when ESS_RTI_3 =>
-                    -- Ciclo 3/4: lee byte bajo de la dirección de retorno desde mem[SP] → TMP_L.
+                    -- Ciclo 3/4: lee el byte bajo de la dirección de retorno desde mem[SP] → TMP_L.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
-                    -- Ciclo 4/4: lee byte alto desde mem[SP+1] → TMP_H.
-                    -- El estado siguiente (ESS_JP_3) carga PC desde TMP.
+                    v_ctrl.SP_Offset  := '0';
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_L := '1';
+                    v_needs_mem := true;
+
+                when ESS_RTI_4 =>
+                    -- Ciclo 4/4: lee el byte alto de la dirección de retorno desde mem[SP+1] → TMP_H.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_SP;
                     v_ctrl.SP_Offset  := '1';
                     v_ctrl.Mem_RE     := '1';
@@ -1220,7 +1272,13 @@ begin
                 when ESS_INT_3 =>
                     -- Ciclo 3/9: guarda PCH (byte alto del PC interrumpido) en mem[SP+1].
                     v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
-                    -- Ciclo 4/9: SP-- para empujar el registro de flags.
+                    v_ctrl.SP_Offset := '1';
+                    v_ctrl.Mem_WE    := '1';
+                    v_ctrl.Out_Sel   := OUT_SEL_PCH;
+                    v_needs_mem := true;
+
+                when ESS_INT_4 =>
+                    -- Ciclo 4/9: SP-- para hacer sitio a los flags.
                     v_ctrl.SP_Op := SP_OP_DEC;
 
                 when ESS_INT_5 =>
@@ -1298,11 +1356,17 @@ begin
                 when ESS_IND_READ_L =>
                     -- Ciclo 2/3: lee el byte bajo del destino indirecto [PC] → TMP_L; PC++.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
-                    -- Ciclo 3/3: lee el byte alto del destino indirecto [PC] → TMP_H.
-                    -- El siguiente estado (ESS_JP_3) carga PC desde TMP.
+                    v_ctrl.Mem_RE     := '1';
+                    v_ctrl.Load_TMP_L := '1';
+                    v_ctrl.PC_Op      := PC_OP_INC;
+                    v_needs_mem := true;
+
+                when ESS_IND_READ_H =>
+                    -- Ciclo 3/3: lee el byte alto del destino indirecto [PC] → TMP_H; PC++.
                     v_ctrl.ABUS_Sel   := ABUS_SRC_PC;
                     v_ctrl.Mem_RE     := '1';
                     v_ctrl.Load_TMP_H := '1';
+                    v_ctrl.PC_Op      := PC_OP_INC;
                     v_needs_mem := true;
 
                 when ESS_OP16_IMM8 =>
@@ -1334,11 +1398,15 @@ begin
                     v_needs_mem := true;
 
                 when ESS_OP16_WB1 =>
-                    -- Ciclo 2/3: calcula A:B +/- TMP (operando 16-bit); escribe byte alto → A.
+                    -- Ciclo 2/3 (o 2/2 para IMM8): calcula A:B +/- TMP; escribe byte alto → A.
+                    -- Para E0/E2 (#n): TMP = {0x00, op1}. Para E1/E3 (#nn): TMP = {op2, op1}.
                     v_ctrl.EA_A_Sel  := EA_A_SRC_REG_AB;
                     v_ctrl.EA_B_Sel  := EA_B_SRC_TMP;
-                    if r_exec_IR = x"E1" then v_ctrl.EA_Op := EA_OP_ADD;
-                    else                       v_ctrl.EA_Op := EA_OP_SUB; end if;
+                    if r_exec_IR = x"E0" or r_exec_IR = x"E1" then
+                        v_ctrl.EA_Op := EA_OP_ADD;
+                    else
+                        v_ctrl.EA_Op := EA_OP_SUB;
+                    end if;
                     v_ctrl.Bus_Op    := EA_HIGH_elected;
                     v_ctrl.Write_A   := '1';
                     v_ctrl.F_Src_Sel := '1';
@@ -1346,18 +1414,11 @@ begin
                     v_ctrl.Flag_Mask := x"F0";
 
                 when ESS_OP16_WB2 =>
-                    -- Ciclo 3/3 (o 2/2 para modo IMM8): escribe el byte bajo del resultado → B.
-                    -- Para IMM8: EA_B = DataIn (el inmediato leido este mismo ciclo).
-                    -- Para modo nn: EA_B = TMP (ya disponible tras FETCH1+WB1).
+                    -- Ciclo 3/3: escribe el byte bajo del resultado → B.
+                    -- TMP siempre contiene el operando completo (cargado en WB1 o TMP_FROM_OP*).
+                    -- Para E0/E2 (#n): TMP = {0x00, op1}. Para E1/E3 (#nn): TMP = {op2, op1}.
                     v_ctrl.EA_A_Sel := EA_A_SRC_REG_AB;
-                    if r_exec_IR = x"E0" or r_exec_IR = x"E2" then
-                        v_ctrl.EA_B_Sel := EA_B_SRC_DATA_IN;
-                        v_ctrl.ABUS_Sel := ABUS_SRC_PC;
-                        v_ctrl.Mem_RE   := '1';
-                        v_needs_mem := true;
-                    else
-                        v_ctrl.EA_B_Sel := EA_B_SRC_TMP;
-                    end if;
+                    v_ctrl.EA_B_Sel := EA_B_SRC_TMP;
                     if r_exec_IR = x"E0" or r_exec_IR = x"E1" then
                         v_ctrl.EA_Op := EA_OP_ADD;
                     else
@@ -1377,14 +1438,20 @@ begin
                     v_needs_mem := true;
 
                 when ESS_LDSP_2 =>
-                    -- Ciclo 2/2 (LD SP,nn): SP ← TMP (la dirección completa ya en TMP).
-                    v_ctrl.Load_Src_Sel := '1'; -- TMP
-                    -- Ciclo único (LD SP,A:B): SP ← A:B usando el sumador EA.
-                    v_ctrl.EA_A_Sel     := EA_A_SRC_REG_AB;
-                    v_ctrl.EA_B_Sel     := EA_B_SRC_ZERO;
-                    v_ctrl.EA_Op        := EA_OP_ADD;
-                    v_ctrl.Load_Src_Sel := LOAD_SRC_ALU_RES;
-                    v_ctrl.SP_Op        := SP_OP_LOAD;
+                    -- Llega aquí desde:
+                    --   LD SP,#nn (0x50): TMP_FROM_OP1→TMP_FROM_OP2→LDSP_2 → SP ← TMP
+                    --   LD SP,A:B (0x51): LDSP_AB→LDSP_2 → SP ← A:B (calcula EA)
+                    if r_exec_IR = x"50" then
+                        -- Ciclo 2/2 (LD SP,nn): SP ← TMP (valor completo en TMP).
+                        v_ctrl.Load_Src_Sel := '1'; -- TMP
+                    else
+                        -- Ciclo único (LD SP,A:B): SP ← A:B usando el sumador EA.
+                        v_ctrl.EA_A_Sel     := EA_A_SRC_REG_AB;
+                        v_ctrl.EA_B_Sel     := EA_B_SRC_ZERO;
+                        v_ctrl.EA_Op        := EA_OP_ADD;
+                        v_ctrl.Load_Src_Sel := LOAD_SRC_ALU_RES;
+                    end if;
+                    v_ctrl.SP_Op := SP_OP_LOAD;
 
                 when ESS_STSP_WB =>
                     -- Ciclo único (ST SP_L,A / ST SP_H,A): calcula EA = SP + 0;
@@ -1456,9 +1523,9 @@ begin
                     v_ctrl.Op_Data    := r_exec_op1;
                     v_ctrl.Op_Sel     := '1';
                     v_ctrl.Load_TMP_L := '1';
-                    -- For zero-page modes and I/O immediate, also clear TMP_H to 0x00.
+                    -- For zero-page modes, I/O immediate, and ADD16/SUB16 #n: clear TMP_H to 0x00.
                     case r_exec_IR is
-                        when x"12"|x"22"|x"16"|x"30"|x"40"|x"32"|x"34"|x"D0"|x"D2"
+                        when x"12"|x"22"|x"16"|x"30"|x"40"|x"32"|x"34"|x"D0"|x"D2"|x"E0"|x"E2"
                             => v_ctrl.Clear_TMP := '1';
                         when others => null;
                     end case;
@@ -1499,17 +1566,33 @@ begin
             v_ctrl.ABUS_Sel := ABUS_SRC_PC;
             v_ctrl.Mem_RE   := '1';
             v_ctrl.PC_Op    := PC_OP_INC;
-            -- Also latch into MDR for instructions that need it (LD A,#n etc.)
-            -- The seq_proc handles this selectively via MDR_WE in the ctrl word
-            -- built during DSS_OP1. For now, just drive the bus; MDR_WE is set
-            -- by the ctrl word in the ID_EX register after DSS completes.
+            -- Latch MDR during OP1 fetch for instructions whose single-cycle EX
+            -- reads MDR (LD A,#n / LD B,#n / ALU imm).  This must happen here,
+            -- during the memory-read cycle, so that MDR contains the correct
+            -- operand byte BEFORE the overlap fetch potentially changes MemDataIn
+            -- in the execution cycle.
+            if dss = DSS_OP1 then
+                case r_IF_ID.opcode is
+                    when x"11"|x"21"|
+                         x"A0"|x"A1"|x"A2"|x"A3"|x"A4"|x"A5"|x"A6"|x"A7" =>
+                        v_ctrl.MDR_WE := '1';
+                    when others => null;
+                end case;
+            end if;
             v_needs_mem := true;
 
         -- =====================================================================
         -- Priority 4: Idle - fetch only
         -- =====================================================================
         else
-            if r_IF_ID.valid = '0' then
+            -- Do NOT generate a fetch when a multi-cycle instruction (is_multi='1')
+            -- is sitting in r_ID_EX awaiting ESS dispatch.  The seq_proc fetch
+            -- condition requires (r_ID_EX.valid='0' or is_single='1'), so the
+            -- instruction on the bus would not be captured into r_IF_ID while the
+            -- PC would still be incremented — causing the next instruction to be
+            -- permanently skipped.
+            if r_IF_ID.valid = '0' and
+               not (r_ID_EX.valid = '1' and r_ID_EX.is_multi = '1') then
                 v_fetch_ok := true;
             end if;
         end if;

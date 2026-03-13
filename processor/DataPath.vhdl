@@ -118,11 +118,8 @@ architecture unique of DataPath is
     --   en el ciclo anterior mediante MDR_WE='1' durante el fetch del operando).
     signal ALU_OpB  : data_vector; -- Operando B seleccionado
 
-    -- New_Flags: flags intermedios antes de aplicar la máscara en RegF.
-    -- Seleccionados entre ALU_Stat (F_Src_Sel='0') y EA_Flags_In (F_Src_Sel='1').
-    -- EA_Flags_In proviene del AddressPath y se usa para instrucciones de 16 bits
-    -- como ADD16/SUB16, que afectan a los flags de carry/overflow de 16 bits.
-    signal New_Flags: status_vector; -- Flags seleccionados (ALU o EA)
+    -- (New_Flags fue señal; movido a variable dentro del proceso secuencial
+    --  para garantizar que RegF recibe el valor correcto en el mismo ciclo.
 
 begin
 
@@ -168,7 +165,7 @@ begin
     -- cubierto por los casos anteriores; como EA_LOW_elected y EA_HIGH_elected son
     -- valores distintos de los previos, serán alcanzados correctamente por el
     -- sintetizador IEEE. No se modifica el código para preservar la intención original.
-    process(Bus_Op, ALU_Res, MDR)
+    process(Bus_Op, ALU_Res, MDR, EA_In)
     begin
         case Bus_Op is
             -- ACC_ALU_elected: la ALU computa; su resultado va al banco de registros.
@@ -202,6 +199,7 @@ begin
     -- Toda escritura en estado persistente (banco de registros, RegF, MDR)
     -- ocurre en el flanco de subida del reloj o al activar reset asíncrono.
     process(clk, reset)
+        variable v_new_flags : status_vector; -- Flags intermedios (ALU o EA); variable para actualización inmediata
     begin
         if reset = '1' then
             -- Reset asíncrono: inicializa todo a cero.
@@ -260,11 +258,11 @@ begin
                 -- Seleccionar fuente de flags:
                 -- F_Src_Sel='0' → flags de la ALU (operaciones de 8 bits).
                 -- F_Src_Sel='1' → flags del AddressPath (operaciones de 16 bits ADD16/SUB16).
-                if F_Src_Sel = '1' then New_Flags <= EA_Flags_In; else New_Flags <= ALU_Stat; end if;
+                if F_Src_Sel = '1' then v_new_flags := EA_Flags_In; else v_new_flags := ALU_Stat; end if;
 
                 -- apply_flag_mask(Old, New, Mask): preserva en RegF los bits donde Mask='0'
-                -- y actualiza con New_Flags los bits donde Mask='1'.
-                RegF <= apply_flag_mask(RegF, New_Flags, Flag_Mask);
+                -- y actualiza con v_new_flags los bits donde Mask='1'.
+                RegF <= apply_flag_mask(RegF, v_new_flags, Flag_Mask);
             end if;
 
             -- ================================================================

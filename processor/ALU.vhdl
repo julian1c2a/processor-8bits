@@ -171,7 +171,7 @@ begin
             --   sigan a un desplazamiento tengan G y E correctos.
             -- -----------------------------------------------------------------
             when OP_LSL | OP_LSR | OP_ROL | OP_ROR | OP_ASL | OP_ASR =>
-                res := do_shift(Oper, RegInA); -- do_shift calcula Z, L, R, V pero no ve RegInB
+                res := do_shift(Oper, RegInA, Carry_in); -- do_shift calcula Z, L, R, V, C(ROL/ROR) pero no ve RegInB
                 -- G y E se añaden externamente: do_shift solo ve RegInA, no RegInB
                 if get_sig_data(RegInA) > get_sig_data(RegInB) then res.status(idx_fG) := '1'; end if; -- G (con signo)
                 if RegInA = RegInB then res.status(idx_fE) := '1'; end if;                             -- E (igualdad bit a bit)

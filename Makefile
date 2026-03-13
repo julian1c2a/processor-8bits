@@ -12,6 +12,7 @@ BUILDDIR_TESTS = $(BUILDDIR)/build_tests
 # Desde PowerShell: añadir C:\msys64\ucrt64\bin al PATH o usar mingw32-make
 GHDL      = /ucrt64/bin/ghdl
 GHDLFLAGS = --std=08 --workdir=$(BUILDDIR)
+GHDLFLAGS_TB = --std=08 --workdir=$(BUILDDIR) -frelaxed
 
 # En Windows, asegurar que ucrt64/bin se busque antes que usr/bin (Cygwin) para
 # que GHDL use el gcc de MinGW/ucrt64 al elaborar y enlazar los ejecutables.
@@ -140,7 +141,7 @@ test-exhaustive: $(EX_EXEC) $(EX_CSVS)
 proc_tb_compile: $(PROC_TB_EXEC)
 
 $(PROC_TB_EXEC): $(OBJS_PROC) $(OBJS_TB) | $(BUILDDIR_TESTS)
-	$(GHDL) -e $(GHDLFLAGS) -o $@ Processor_Top_tb
+	$(GHDL) -e $(GHDLFLAGS_TB) -o $@ Processor_Top_tb
 
 # Regla genérica: proc_tb_01, proc_tb_02 … proc_tb_13
 # Convierte el sufijo numérico (con cero) en el valor del generic PROGRAM_SEL
@@ -179,7 +180,7 @@ $(BUILDDIR)/%.o: $(SRCDIR_PROC)/%.vhdl | $(BUILDDIR)
 	$(GHDL) -a $(GHDLFLAGS) $<
 
 $(BUILDDIR)/%.o: $(SRCDIR_TB)/%.vhdl | $(BUILDDIR)
-	$(GHDL) -a $(GHDLFLAGS) $<
+	$(GHDL) -a $(GHDLFLAGS_TB) $<
 
 $(BUILDDIR_TESTS)/%_tb$(EXT): $(SRCDIR_TB)/%_tb.vhdl $(OBJS_PROC) $(OBJS_TB) | $(BUILDDIR_TESTS)
 	$(GHDL) -e $(GHDLFLAGS) -o $@ $(notdir $(basename $<))

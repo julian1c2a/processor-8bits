@@ -52,7 +52,7 @@ package ALU_functions_pkg is
     --   Solo recibe el operando 'val' (= RegInA); no conoce RegInB, por lo que
     --   los flags G y E deben añadirse externamente desde ALU.vhdl.
     -- -------------------------------------------------------------------------
-    function do_shift(op : opcode_vector; val : data_vector) return alu_result_record;
+    function do_shift(op : opcode_vector; val : data_vector; carry_in : std_logic := '0') return alu_result_record;
 
     -- -------------------------------------------------------------------------
     -- Helpers semánticos para slicing y conversión de datos.
@@ -279,7 +279,7 @@ package body ALU_functions_pkg is
     --
     --   NOTA: do_shift no ve RegInB, por lo que los flags G y E deben añadirse
     --   externamente en ALU.vhdl tras llamar a esta función.
-    function do_shift(op : opcode_vector; val : data_vector) return alu_result_record is
+    function do_shift(op : opcode_vector; val : data_vector; carry_in : std_logic := '0') return alu_result_record is
         variable ret : alu_result_record;
     begin
         ret.status := (others => '0'); -- Inicializar todos los flags a 0; se sobrescribirán según la operación
@@ -295,13 +295,15 @@ package body ALU_functions_pkg is
                 ret.acc := '0' & val(MSB_DATA downto 1);     -- 0 || [7:1]
                 ret.status(idx_fR) := val(0);                 -- R = bit desalojado por la derecha
 
-            -- ROL: rotación circular izquierda; el MSB regresa como LSB (sin pérdida de datos)
+            -- ROL: rotación de 9 bits a través del carry; carry_in entra por LSB, MSB sale al flag C
             when OP_ROL =>
-                ret.acc := val(MSB_DATA-1 downto 0) & val(MSB_DATA); -- [6:0] || [7]
+                ret.acc := val(MSB_DATA-1 downto 0) & carry_in; -- [6:0] || carry_in
+                ret.status(idx_fC) := val(MSB_DATA);             -- C = MSB desalojado
 
-            -- ROR: rotación circular derecha; el LSB regresa como MSB (sin pérdida de datos)
+            -- ROR: rotación de 9 bits a través del carry; carry_in entra por MSB, LSB sale al flag C
             when OP_ROR =>
-                ret.acc := val(0) & val(MSB_DATA downto 1);   -- [0] || [7:1]
+                ret.acc := carry_in & val(MSB_DATA downto 1);    -- carry_in || [7:1]
+                ret.status(idx_fC) := val(0);                     -- C = LSB desalojado
 
             -- ASL: desplaza izquierda aritmético; detecta overflow si cambia el signo
             when OP_ASL =>
