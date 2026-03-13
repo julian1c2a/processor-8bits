@@ -75,7 +75,27 @@ La documentación técnica detallada de cada subsistema se encuentra en los sigu
 
 El proyecto utiliza un sistema de verificación exhaustivo para la ALU (con oráculo en Python) y un testbench de sistema (`Processor_Top_tb.vhdl`) que carga y ejecuta programas de prueba para validar la integración de los componentes y la lógica de control.
 
-* **Detalles de los Testbenches**
+### Estado de Verificación — ISA v0.7
+
+| # | Testbench | Tiempo PASS | Qué verifica |
+|:---:|:---|:---:|:---|
+| TB-01 | Instrucciones unarias | @1415 ns | NOT, NEG, INC, DEC, CLR, SET, SWAP |
+| TB-02 | ALU registro | @1825 ns | ADD, ADC, SUB, SBB, AND, OR, XOR, CMP, MUL, MUH |
+| TB-03 | ALU inmediato | @1345 ns | Variantes `#n` de las operaciones ALU |
+| TB-04 | Desplazamientos/rotaciones | @1325 ns | LSL, LSR, ASL, ASR, ROL, ROR |
+| TB-05 | Cargas y almacenamientos | @1795 ns | LD/ST modos: `#n`, `[n]`, `[nn]`, `[B]`, `[nn+B]` |
+| TB-06 | Saltos incondicionales | @1585 ns | JP nn, JR rel8, JPN, JP([nn]), JP A:B |
+| TB-07 | Saltos condicionales | @2515 ns | BEQ, BNE, BCS, BCC, BVS, BVC, BGT, BLE, BGE, BLT, BHC, BEQ2 |
+| TB-08 | CALL / RET | @1025 ns | Llamadas a subrutina y retorno |
+| TB-09 | PUSH / POP | @1125 ns | PUSH/POP de A, B, F y par A:B |
+| TB-10 | Stack Pointer | @935 ns | LD SP, RD SP\_L/H |
+| TB-11 | ADD16 / SUB16 | @1495 ns | Aritmética de 16 bits sobre el par A:B |
+| TB-12 | Interrupciones IRQ/NMI | @1615 ns | Secuencia ESS\_INT, RTI, vectores 0xFFFE/0xFFFA |
+| TB-13 | Pipeline hazards | @515 ns | Stall RAW (LD A→ADD) y flush de salto tomado (JP) |
+
+**ALU exhaustiva:** 28/28 operaciones PASS · ~2 millones de vectores (oráculo Python).
+
+* **Detalles de los Testbenches:** ver [`testbenchs/README-TB.md`](testbenchs/README-TB.md)
 
 ---
 

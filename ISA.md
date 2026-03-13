@@ -2,7 +2,7 @@
 
 ## Procesador de 8 bits con bus de direcciones de 16 bits
 
-> **Estado: borrador v0.7** — Pipeline de 4 etapas FETCH|DECODE|EXEC|WB con hazard unit completa (forwarding + stalls).
+> **Estado: implementado y verificado v0.7 — TB-01 a TB-13: PASS** — Pipeline de 4 etapas FETCH|DECODE|EXEC|WB con hazard unit completa (stalls RAW; forwarding → v0.8).
 > *(v0.6: BRAM TDP Port B exclusivo de stack; BSR rel8; LR; RAS 4 entradas; CALL nn→4 cy, RET→2 cy. v0.5: pipeline 2 etapas DECODE|EXEC+WB; especulación BRAM; ADD16/SUB16; IN/OUT. v0.4: 450 MHz; UART1; timers atómicos. v0.3: NEG/INCB/DECB; indexado; I/O; PFQ; EA-adder; PUSH/POP 16 b.)*
 
 ---
@@ -23,7 +23,7 @@
 | SRAM página cero       | BlockRAM dedicada, 1 ciclo   |
 | Plataforma             | Nexys 7 100T (Artix-7 XC7A100T) |
 | Frecuencia de reloj    | 450 MHz (MMCM/PLL interno; SRAM ext. 4 wait states) |
-| Unidad de Control      | Microcode (ROM de microinstrucciones) |
+| Unidad de Control      | Hardwired FSM + pipeline de 4 etapas (DSS/ESS) |
 
 El procesador es de arquitectura **acumulador**: la ALU toma A y B como
 operandos y el resultado siempre vuelve a A. B actúa como operando
@@ -115,9 +115,11 @@ C = 0  →  hubo préstamo →  A < B
 > El I/O **no** está mapeado en memoria; se accede con instrucciones `IN`/`OUT`
 > (espacio físico separado — ver §4.2).
 >
-> El stack crece desde `0xFFFF` hacia abajo. SP inicial = `0xFFFF`; el
-> primer PUSH escribe en `0xFFFE` (¡coincide con vector IRQ si SP no se
-> inicializa antes!). Se recomienda inicializar SP en `0xFFF9` o inferior.
+> El stack crece desde `0xFFFE` hacia abajo. SP inicial = `0xFFFE` (alineado
+> a par en reset); cada PUSH decrementa SP en 2. Con más de 1 PUSH sin
+> reinicializar, la pila puede solapar los vectores (`0xFFFA`–`0xFFFF`).
+> **Se recomienda inicializar SP** con `LD SP, #nn` a una dirección baja
+> antes de usar interrupciones o subrutinas recurrentes.
 
 ### 4.2 Espacio de I/O (256 puertos, 8-bit independiente)
 
@@ -562,7 +564,7 @@ ADD16/SUB16[ *  -  *  *  -  -  -  -  ]   (C/V/Z de 16 bits; Z si A:B=0x0000)
        [n] [nn][nn+B]
 5x LDSP LDSP RDSP RDSP  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
       #nn A:B   _L   _H
-6x PUSHA PUSHB PUSHF POPA POPB POPF  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
+6x PUSHA PUSHB PUSHF PUSH[AB] POPA POPB POPF POP[AB]  ---  ---  ---  ---  ---  ---  ---  ---
 7x   JP   JR  JPN  JP() JP CALL CALL  RET  ---  ---  ---  ---  ---  ---  ---  ---
        nn   r8   p8  [nn] A:B   nn  [nn]
 Fx  BSR  RET CALL  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---  ---
@@ -583,7 +585,8 @@ Los opcodes marcados con `---` están **reservados** para extensiones futuras.
 
 > `0xF0` = `BSR rel8`, `0xF1` = `RET LR`, `0xF2` = `CALL LR, nn`.
 > `0x68` = `PUSH LR`, `0x69` = `POP LR` (provisionales — pendiente §7.3).
-> Resto de la fila `Fx` y `6x` libres.
+> Fila `6x`: `0x60`–`0x67` asignados (PUSH/POP A/B/F/A:B); `0x68`–`0x6F` libres (provisional LR).
+> Resto de la fila `Fx` libre.
 
 ---
 
@@ -1103,7 +1106,11 @@ isr:
 - [~] **Pipeline 3 etapas**: la ganancia marginal sobre 2 etapas no justificaba la complejidad. Se implementó directamente el pipeline de 4 etapas (v0.7).
 - [~] **Unidad de Control basada en microcode (ROM)**: se optó por hardwired FSM+pipeline para mayor frecuencia y menor latencia de decodificación. El microcode queda como alternativa futura opcional.
 
-### Pendientes
+### Pendientes — implementación RTL (v0.8+)
+
+> Nota: las secciones §10.6–§10.9 documentan el diseño micro-arquitectural
+> de estas optimizaciones. «Pendientes» aquí significa que el RTL VHDL aún
+> no las implementa; la ISA y las asignaciones de opcode ya están fijadas.
 
 - [ ] **Forwarding / Bypassing** (v0.8): bypass EX→EX y MEM→EX para eliminar stalls RAW. Actualmente se insertan stalls de 1 ciclo por dependencia.
 - [ ] **Especulación de dirección BRAM**: emitir dirección al RAMB18 en el último ciclo de DECODE para modos `[n]`, `[B]`, stack. Ver §10.6.

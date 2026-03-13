@@ -73,13 +73,29 @@ Este testbench instancia la entidad `Processor_Top` completa y la conecta a una 
 ### Funcionamiento
 
 1. **RAM Simulada:** Se declara una señal de tipo `array` que modela los 64KB de memoria del procesador.
-2. **Carga de Programa:** El programa de prueba se "carga" directamente en la RAM durante la inicialización del testbench.
+2. **Carga de Programa:** El programa de prueba se "carga" directamente en la RAM durante la inicialización del testbench (generic `PROGRAM_SEL`).
 3. **Ejecución:** Se aplica un pulso de `reset` y se deja que el procesador ejecute el programa cargado.
-4. **Verificación:** Al final de la simulación, se usan sentencias `assert` para verificar:
-    - La posición final del Program Counter (PC).
-    - El contenido de posiciones de memoria específicas que el programa debía modificar.
+4. **Verificación:** Al final de la simulación, sentencias `assert` comprueban el contenido de posiciones de memoria específicas que el programa debía modificar.
 
-Este enfoque permite crear pruebas dirigidas para verificar la correcta implementación de cada instrucción y modo de direccionamiento en la Unidad de Control.
+### Programas de prueba — TB-01 a TB-13: ALL PASS
+
+| # | Nombre | Tiempo PASS | Qué verifica |
+|:---:|:---|:---:|:---|
+| TB-01 | Instrucciones unarias | @1415 ns | NOT, NEG, INC, DEC, CLR, SET, SWAP sobre registro A |
+| TB-02 | ALU registro | @1825 ns | ADD, ADC, SUB, SBB, AND, OR, XOR, CMP, MUL, MUH (operandos en A y B) |
+| TB-03 | ALU inmediato | @1345 ns | Variantes con operando `#n` de las operaciones ALU |
+| TB-04 | Desplazamientos y rotaciones | @1325 ns | LSL, LSR, ASL, ASR, ROL, ROR |
+| TB-05 | Cargas y almacenamientos | @1795 ns | LD/ST en modos: `#n`, `[n]`, `[nn]`, `[B]`, `[nn+B]` |
+| TB-06 | Saltos incondicionales | @1585 ns | JP nn, JR rel8, JPN, JP([nn]), JP A:B |
+| TB-07 | Saltos condicionales | @2515 ns | BEQ, BNE, BCS, BCC, BVS, BVC, BGT, BLE, BGE, BLT, BHC, BEQ2 |
+| TB-08 | CALL / RET | @1025 ns | Llamada a subrutina y retorno (push/pop dirección) |
+| TB-09 | PUSH / POP | @1125 ns | PUSH/POP de A, B, F y par A:B; verificación valores en pila |
+| TB-10 | Stack Pointer | @935 ns | `LD SP, #nn`; lectura de SP\_L y SP\_H mediante RD SP |
+| TB-11 | ADD16 / SUB16 | @1495 ns | Aritmética de 16 bits sobre par A:B (modos `#n` y `#nn`) |
+| TB-12 | Interrupciones IRQ/NMI | @1615 ns | Secuencia ESS\_INT, RTI, vectores `0xFFFE` (IRQ) y `0xFFFA` (NMI) |
+| TB-13 | Pipeline hazards | @515 ns | Stall RAW (LD A,#n → ADD #0) y flush de salto tomado (JP sobre INC A) |
+
+**Nota TB-12:** El programa inicializa `SP = 0x01FF` con `LD SP, #0x01FF` para evitar que las tres bajadas de SP durante `ESS_INT` (desde `0xFFFE`) solapen los vectores de interrupción en `0xFFFA`–`0xFFFF`.
 
 ---
 
