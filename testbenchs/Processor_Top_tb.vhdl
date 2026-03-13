@@ -881,14 +881,20 @@ begin
         -- porque irq_sig y nmi_sig permanecen en '0'
         -- ---------------------------------------------------------------
         if PROGRAM_SEL = 12 then
-            wait for CLK_PERIOD * 15;   -- esperar 15 ciclos para que SEI esté activo
+            -- Esperar a que el procesador llegue al HALT (~30 ciclos tras reset)
+            wait for CLK_PERIOD * 35;
+            -- Pulsar IRQ: 5 ciclos para que sea aceptada desde HALT
             irq_sig <= '1';
-            wait for CLK_PERIOD * 2;
+            wait for CLK_PERIOD * 5;
             irq_sig <= '0';
-            wait for CLK_PERIOD * 30;   -- esperar 30 ciclos más para NMI
+            -- Esperar que el handler IRQ ejecute y RTI retorne al HALT (~50 ciclos)
+            wait for CLK_PERIOD * 55;
+            -- Pulsar NMI: 5 ciclos
             nmi_sig <= '1';
-            wait for CLK_PERIOD * 2;
+            wait for CLK_PERIOD * 5;
             nmi_sig <= '0';
+            -- Esperar que el handler NMI ejecute y RTI retorne al HALT (~50 ciclos)
+            wait for CLK_PERIOD * 55;
         end if;
 
         -- ---------------------------------------------------------------
@@ -1110,7 +1116,9 @@ begin
                 report "TB-12 FAIL IRQ handler: esperado contador=1, obtenido 0x" & to_hstring(RAM(16#0100#)) severity error;
             assert RAM(16#0101#) = x"01"
                 report "TB-12 FAIL NMI handler: esperado contador=1, obtenido 0x" & to_hstring(RAM(16#0101#)) severity error;
-            report "TB-12 PASS: Interrupciones IRQ/NMI verificadas.";
+            if RAM(16#0100#) = x"01" and RAM(16#0101#) = x"01" then
+                report "TB-12 PASS: Interrupciones IRQ/NMI verificadas.";
+            end if;
 
         elsif PROGRAM_SEL = 13 then
             assert RAM(16#0100#) = x"42"

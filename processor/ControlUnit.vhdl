@@ -405,7 +405,17 @@ begin
                     when ESS_OUT_WRITE => ess <= ESS_IDLE;
 
                     when ESS_SKIP_BYTE => ess <= ESS_IDLE;
-                    when ESS_HALT      => ess <= ESS_HALT;
+                    when ESS_HALT      =>
+                        -- Check for IRQ/NMI to wake the processor from HALT.
+                        if NMI = '1' then
+                            handling_nmi <= '1';
+                            ess          <= ESS_INT_1;
+                        elsif IRQ = '1' and I_Flag = '1' then
+                            handling_nmi <= '0';
+                            ess          <= ESS_INT_1;
+                        else
+                            ess <= ESS_HALT;
+                        end if;
 
                     -- Pipeline TMP loading: load TMP from r_exec_op1 (low) then r_exec_op2 (high)
                     -- without accessing memory.  Two sequential states load each byte, then
