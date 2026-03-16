@@ -186,14 +186,40 @@ La tabla de transiciones completa está implementada en `ControlUnit.vhdl` dentr
 
 ---
 
-## Detección de Hazards
+## Detección de Hazards y Forwarding EX→EX
 
-La UC detecta hazards RAW (Read After Write) comparando las etiquetas del ID/EX:
+La UC detecta dependencias RAW (Read After Write) en la etapa DECODE comparando etiquetas del
+registro ID/EX en vuelo con el descriptor que se está construyendo para la instrucción siguiente:
 
-- Si `ID_EX.writes_a = '1'` y la instrucción siguiente tiene `reads_a = '1'`, se inserta una burbuja (stall de 1 ciclo).
-- Lo mismo para el registro B (`writes_b` / `reads_b`).
+- Si `r_ID_EX.writes_a = '1'` y la instrucción entrante tiene `reads_a = '1'`, se activa
+  `Fwd_A_En = '1'` en el `ctrl` del nuevo descriptor ID/EX.
 
-No se implementa forwarding; la solución es conservadora (stall exacto de 1 ciclo cuando hay dependencia).
+### Por qué no se inserta stall
+
+El pipeline sincrónico garantiza **write-before-read** sin ciclo extra:
+
+| Flanco T↑ | Acción |
+|---|---|
+| RegA ← Bus_Int (resultado de I₁, `Write_A='1'`) | Escritura síncrona |
+| r_ID_EX ← I₂ (solapamiento DECODE+EX, v0.8) | Decode simultáneo |
+| Comb post-T↑: `ALU_OpA = RegA` | I₂ ya ve el valor actualizado |
+
+Como RegA se actualiza **en el mismo flanco** que I₂ entra en r_ID_EX, su evaluación
+combinatoria posterior (período T→T+1) lee el valor correcto. No es necesario stall.
+
+### Función de Fwd_A_En
+
+`Fwd_A_En='1'` selecciona `Fwd_A_Data` en el mux del DataPath:
+
+```
+ALU_OpA <= Fwd_A_Data when Fwd_A_En='1' else RegA;
+Fwd_A_Data := s_DataPath_RegA  (= RegA, del Processor_Top)
+```
+
+Con la conexión actual `Fwd_A_Data = RegA`, ambos caminos son funcionalmente idénticos.
+La señal **documenta explícitamente** que la dependencia ha sido resuelta por forwarding y
+prepara el hardware para una futura fuente alternativa de `Fwd_A_Data` (p. ej. un write-back
+combinatorial) sin modificar la ControlUnit.
 
 ---
 
