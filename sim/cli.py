@@ -300,6 +300,7 @@ class CLI:
 
         self.cpu.PC   = self._prog_org
         self._loaded  = True
+        cycles_before = self.cpu.total_cycles
 
         print(_dim(f'Programa cargado en {self._prog_org:#06x} '
                    f'({len(binary)} bytes). Ejecutando...\n'))
@@ -328,6 +329,9 @@ class CLI:
 
         print()
         show_regs(self.cpu)
+        prog_cycles = self.cpu.total_cycles - cycles_before
+        print(_dim(f'  Programa: {prog_cycles} ciclos'
+                   f'  ≈ {prog_cycles / 10:.1f} ns  @ 100 MHz'))
 
     def _cmd_step(self):
         """Ejecuta una sola instrucción."""

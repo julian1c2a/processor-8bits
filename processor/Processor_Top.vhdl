@@ -121,6 +121,13 @@ architecture Structural of Processor_Top is
     --   Esto permite ADD16/SUB16 donde A:B actúa como acumulador de 16 bits.
     signal s_DataPath_RegA    : data_vector; -- Nuevo: Salida A
 
+    -- s_fwd_a_data: dato de forwarding EX→EX para la entrada A de la ALU en DataPath.
+    --   Actualmente conectado a s_DataPath_RegA (RegA), lo que hace el bypass transparente
+    --   cuando Fwd_A_En='0' (comportamiento por defecto: no forwarding activo).
+    --   En v0.8, cuando la UC implemente solapamiento DECODE+EX, este bus se
+    --   conectará al resultado de write-back del ciclo anterior para completar el bypass.
+    signal s_fwd_a_data       : data_vector;
+
     -- s_AddressPath_PC: valor actual del PC exportado por AddressPath hacia DataPath.
     --   DataPath necesita el PC para la instrucción CALL: debe hacer PUSH del
     --   PC actual (dirección de retorno) en la pila antes de saltar a la subrutina.
@@ -175,6 +182,12 @@ begin
     --   Modo pipeline (Op_Sel='1'): usa Op_Data del CtrlBus (operando pre-fetched del pipeline
     --     para instrucciones de 3 bytes, evitando un ciclo extra de lectura de memoria).
     s_addr_data_in <= s_CtrlBus.Op_Data when s_CtrlBus.Op_Sel = '1' else MemData_In;
+
+    -- Routing del dato de forwarding: actualmente se usa RegA_Out (valor registrado).
+    -- Garantiza que Fwd_A_En='1' con este conexionado reproduce el mismo valor que RegA,
+    -- manteniendo compatibilidad con todos los testbenches existentes hasta que el
+    -- paso [2] (solapamiento DECODE+EX) requiera un valor de WB diferente.
+    s_fwd_a_data <= s_DataPath_RegA;
 
     Inst_AddrPath: AddressPath_comp
         Port map (
@@ -232,7 +245,10 @@ begin
             Load_F_Direct => s_CtrlBus.Load_F_Direct, -- '1'=carga F directamente desde bus interno (POP F, RTI)
             EA_In      => s_AddressPath_EA,    -- Resultado EA de 16 bits desde AddressPath (ADD16/SUB16, ST SP_L/H)
             EA_Flags_In => s_AddressPath_Flags, -- Flags C/Z del sumador EA (para Write_F tras ADD16/SUB16)
-            F_Src_Sel  => s_CtrlBus.F_Src_Sel  -- Selección fuente flags: 0=ALU, 1=AddressPath EA
+            F_Src_Sel  => s_CtrlBus.F_Src_Sel, -- Selección fuente flags: 0=ALU, 1=AddressPath EA
+            -- Forwarding EX→EX: bypass de operando A
+            Fwd_A_En   => s_CtrlBus.Fwd_A_En,  -- Habilita bypass (UC lo controla)
+            Fwd_A_Data => s_fwd_a_data          -- Dato de forwarding (actualmente = RegA)
         );
 
     -- ========================================================================

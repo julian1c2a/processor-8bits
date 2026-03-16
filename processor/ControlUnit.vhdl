@@ -254,16 +254,33 @@ architecture pipeline of ControlUnit is
         return c;
     end function;
 
+    -- Identifica instrucciones de 1 byte con latencia de 1 ciclo de reloj.
+    -- Estas instrucciones son candidatas al solapamiento DECODE+EX: mientras la UC
+    -- ejecuta la instrucción I (is_single='1'), puede decodificar la instrucción I+1
+    -- en el mismo ciclo de reloj, logrando throughput de 1 ciclo por instrucción.
+    function is_1byte_single_f(op : data_vector) return boolean is
+    begin
+        case op is
+            when x"00"|x"02"|x"03"|x"04"|x"05"                                => return true; -- NOP, SEC, CLC, SEI, CLI
+            when x"10"|x"20"                                                    => return true; -- LD A,B / LD B,A
+            when x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"|x"97"|x"98"|x"99" => return true; -- ALU reg (incluye MUL/MUH)
+            when x"C0"|x"C1"|x"C2"|x"C3"|x"C4"|x"C5"|x"C6"|x"C7"|
+                 x"C8"|x"C9"|x"CA"|x"CB"|x"CC"|x"CD"|x"CE"                  => return true; -- ALU unario
+            when others                                                          => return false;
+        end case;
+    end function;
+
 begin
 
     -- =========================================================================
     -- Sequential Process
     -- =========================================================================
     seq_proc : process(clk, reset)
-        variable v_raw   : boolean;
-        variable v_taken : boolean;
-        variable v_nop   : ID_EX_reg_t;
-        variable v_c     : control_bus_t;
+        variable v_raw              : boolean;
+        variable v_taken            : boolean;
+        variable v_nop              : ID_EX_reg_t;
+        variable v_c                : control_bus_t;
+        variable v_did_decode_1byte : boolean; -- true cuando se decodificó instrucción de 1B/1ciclo
     begin
         if reset = '1' then
             r_IF_ID      <= NOP_IF_ID;
@@ -277,6 +294,7 @@ begin
             handling_nmi <= '0';
 
         elsif rising_edge(clk) then
+            v_did_decode_1byte := false;
 
             if ess /= ESS_IDLE then
                 -- ============================================================
@@ -550,19 +568,15 @@ begin
                 -- DECODE stage: process r_IF_ID
                 -- Build r_ID_EX when r_ID_EX is empty and no hazard.
                 -- ----------------------------------------------------------
-                if r_IF_ID.valid = '1' and r_ID_EX.valid = '0' then
-                    -- RAW hazard check (against the entry we JUST consumed this cycle;
-                    -- since we cleared r_ID_EX above the hazard check must use a snapshot.
-                    -- We detect hazards conservatively: stall if there is a pending
-                    -- single-cycle write that hasn't retired yet.
-                    -- In this implementation, since single-cycle instructions take 1 clock
-                    -- and we consume r_ID_EX before the DECODE runs in the same cycle,
-                    -- the result is available at the start of the NEXT cycle.  Therefore
-                    -- a 1-cycle stall is required any time the just-launched EX writes
-                    -- a register the next instruction reads.
-                    -- The hazard is already gone if r_ID_EX.valid was '0' before we got here.
-                    -- We insert the stall by NOT writing r_ID_EX this cycle, holding r_IF_ID.
-                    v_raw := false; -- no hazard by default when r_ID_EX.valid was already '0'
+                -- Solapamiento DECODE+EX: si r_ID_EX tiene instrucción de 1 ciclo, DECODE
+                -- puede ejecutarse en el mismo ciclo de reloj que EX, reduciendo la latencia
+                -- de instrucciones de 1B/1ciclo consecutivas a 1 ciclo por instrucción.
+                if r_IF_ID.valid = '1' and
+                   (r_ID_EX.valid = '0' or (r_ID_EX.valid = '1' and r_ID_EX.is_single = '1')) then
+                    -- Sin hazard RAW: la escritura de EX(I) se completa en este mismo flanco
+                    -- ascendente; EX(I+1) leerá el banco de registros en el siguiente flanco,
+                    -- donde el valor ya es correcto. No se necesita stall ni forwarding.
+                    v_raw := false;
 
                     if not v_raw then
                         case dss is
@@ -580,6 +594,7 @@ begin
                                             reads_a=>'0', reads_b=>'0',
                                             is_single=>'1', is_multi=>'0');
                                         r_IF_ID <= NOP_IF_ID;
+                                        v_did_decode_1byte := true;
 
                                     -- SEC
                                     when x"02" =>
@@ -595,6 +610,7 @@ begin
                                             reads_a=>'1', reads_b=>'0',
                                             is_single=>'1', is_multi=>'0');
                                         r_IF_ID <= NOP_IF_ID;
+                                        v_did_decode_1byte := true;
 
                                     -- CLC
                                     when x"03" =>
@@ -610,6 +626,7 @@ begin
                                             reads_a=>'1', reads_b=>'0',
                                             is_single=>'1', is_multi=>'0');
                                         r_IF_ID <= NOP_IF_ID;
+                                        v_did_decode_1byte := true;
 
                                     -- SEI / CLI: NOP ctrl, I_Flag updated in EX stage
                                     when x"04" | x"05" =>
@@ -619,6 +636,7 @@ begin
                                             reads_a=>'0', reads_b=>'0',
                                             is_single=>'1', is_multi=>'0');
                                         r_IF_ID <= NOP_IF_ID;
+                                        v_did_decode_1byte := true;
 
                                     -- RTI (0x06): multi-cycle
                                     when x"06" =>
@@ -653,6 +671,7 @@ begin
                                             reads_a=>'0', reads_b=>'1',
                                             is_single=>'1', is_multi=>'0');
                                         r_IF_ID <= NOP_IF_ID;
+                                        v_did_decode_1byte := true;
 
                                     -- LD B,A (0x20)
                                     when x"20" =>
@@ -667,6 +686,7 @@ begin
                                             reads_a=>'1', reads_b=>'0',
                                             is_single=>'1', is_multi=>'0');
                                         r_IF_ID <= NOP_IF_ID;
+                                        v_did_decode_1byte := true;
 
                                     -- LD A,[B] (0x14): multi-cycle, 1-byte
                                     when x"14" =>
@@ -704,6 +724,7 @@ begin
                                             reads_a=>'1', reads_b=>'1',
                                             is_single=>'1', is_multi=>'0');
                                         r_IF_ID <= NOP_IF_ID;
+                                        v_did_decode_1byte := true;
 
                                     -- MUL/MUH (0x98..0x99): single-cycle, A = A×B low/high
                                     when x"98"|x"99" =>
@@ -714,6 +735,7 @@ begin
                                             reads_a=>'1', reads_b=>'1',
                                             is_single=>'1', is_multi=>'0');
                                         r_IF_ID <= NOP_IF_ID;
+                                        v_did_decode_1byte := true;
 
                                     -- ALU unary ops (0xC0..0xCE): single-cycle
                                     when x"C0"|x"C1"|x"C2"|x"C3"|x"C4"|x"C5"|x"C6"|x"C7"|
@@ -726,6 +748,7 @@ begin
                                             reads_b=>reads_b_f(r_IF_ID.opcode),
                                             is_single=>'1', is_multi=>'0');
                                         r_IF_ID <= NOP_IF_ID;
+                                        v_did_decode_1byte := true;
 
                                     -- PUSH * (0x60..0x63): multi-cycle, 1-byte
                                     when x"60"|x"61"|x"62"|x"63" =>
@@ -949,7 +972,15 @@ begin
                             when others => null;
                         end case;
                     end if; -- not v_raw
-                end if; -- r_IF_ID.valid and r_ID_EX.valid='0'
+
+                    -- Captura anticipada del siguiente opcode: si decodificamos una instrucción
+                    -- de 1B/1ciclo, comb_proc ya habrá puesto ABUS=PC y Mem_RE=1 este ciclo,
+                    -- con lo que InstrIn contiene el opcode siguiente. Lo capturamos en r_IF_ID
+                    -- en lugar de dejarlo vacío (NOP_IF_ID), logrando throughput de 1 ciclo.
+                    if v_did_decode_1byte and Mem_Ready = '1' then
+                        r_IF_ID <= (valid => '1', opcode => InstrIn);
+                    end if;
+                end if; -- r_IF_ID.valid y condición DECODE
 
                 -- ----------------------------------------------------------
                 -- FETCH stage: latch incoming opcode into r_IF_ID
@@ -1556,9 +1587,16 @@ begin
             if v_ctrl.Mem_RE = '1' or v_ctrl.Mem_WE = '1' then
                 v_needs_mem := true;
             end if;
-            -- Overlap fetch if bus is free
-            if not v_needs_mem and r_IF_ID.valid = '0' then
-                v_fetch_ok := true;
+            -- Overlap fetch si el bus está libre:
+            -- caso 1: r_IF_ID vacío → buscar próxima instrucción.
+            -- caso 2: r_IF_ID tiene instrucción 1B/1ciclo → DECODE la consumirá este ciclo;
+            --         pre-buscar la instrucción siguiente para evitar burbuja.
+            if not v_needs_mem then
+                if r_IF_ID.valid = '0' then
+                    v_fetch_ok := true;
+                elsif dss = DSS_OPCODE and is_1byte_single_f(r_IF_ID.opcode) then
+                    v_fetch_ok := true; -- DECODE+EX overlap: pre-fetch solapado
+                end if;
             end if;
 
         -- =====================================================================
@@ -1595,6 +1633,13 @@ begin
             -- permanently skipped.
             if r_IF_ID.valid = '0' and
                not (r_ID_EX.valid = '1' and r_ID_EX.is_multi = '1') then
+                v_fetch_ok := true;
+            end if;
+            -- Pre-fetch durante DECODE de instrucción 1B/1ciclo (r_ID_EX vacío):
+            -- el siguiente ciclo será EX de la instrucción actual; si ya tenemos
+            -- el opcode siguiente en r_IF_ID, se producirá el solapamiento DECODE+EX.
+            if r_IF_ID.valid = '1' and r_ID_EX.valid = '0' and
+               dss = DSS_OPCODE and is_1byte_single_f(r_IF_ID.opcode) then
                 v_fetch_ok := true;
             end if;
         end if;

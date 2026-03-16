@@ -21,6 +21,14 @@ F_C = 0x80; F_H = 0x40; F_V = 0x20; F_Z = 0x10
 F_G = 0x08; F_E = 0x04; F_R = 0x02; F_L = 0x01
 FLAG_MASK = 0xFF
 
+# Opcodes de 1 byte que ejecutan en 1 ciclo con solapamiento DECODE+EX (v0.8)
+_1BYTE_SINGLE_OPCODES = frozenset([
+    0x00, 0x02, 0x03, 0x04, 0x05,   # NOP, SEC, CLC, SEI, CLI
+    0x10, 0x20,                       # LD A,B  /  LD B,A
+    *range(0x90, 0x9A),              # ADD ADC SUB SBB AND OR XOR CMP MUL MUH
+    *range(0xC0, 0xCF),             # NOT NEG INC DEC CLR SET LSL LSR ASL ASR ROL ROR SWAP
+])
+
 
 @dataclass
 class StepResult:
@@ -57,6 +65,8 @@ class CPU:
         self.halted:  bool = False
         self._pending_irq: bool = False
         self._pending_nmi: bool = False
+        self.total_cycles:       int  = 0
+        self._prev_1byte_single: bool = False
 
     def hard_reset(self):
         """Reinicia todo, incluyendo memoria y E/S."""
@@ -172,6 +182,7 @@ class CPU:
                                raw_bytes=[], cycles=9, halted=False)
                 r.reg_diff = self._make_reg_diff(before)
                 r.mem_diff = mem_diff
+                self.total_cycles += 9; self._prev_1byte_single = False
                 return r
             elif self._pending_irq and self.I:
                 self._pending_irq = False
@@ -182,6 +193,7 @@ class CPU:
                                raw_bytes=[], cycles=9, halted=False)
                 r.reg_diff = self._make_reg_diff(before)
                 r.mem_diff = mem_diff
+                self.total_cycles += 9; self._prev_1byte_single = False
                 return r
             else:
                 return StepResult(pc_before=self.PC,
@@ -679,6 +691,11 @@ class CPU:
             nn=fetch16(); mnemonic=f'CALL LR, {nn:#06x}'
             self.LR=self.PC; self.PC=nn; cycles=3
 
+        # Solapamiento DECODE+EX (v0.8): instrucciones 1B/1-ciclo consecutivas → 1 ciclo
+        _is_1byte_single = opcode in _1BYTE_SINGLE_OPCODES
+        if _is_1byte_single and self._prev_1byte_single:
+            cycles = 1
+
         # -------------------------------------------------------
         result = StepResult(
             pc_before = pc0,
@@ -690,6 +707,8 @@ class CPU:
         result.reg_diff = self._make_reg_diff(before)
         result.mem_diff = mem_diff
         result.io_diff  = io_diff
+        self._prev_1byte_single = _is_1byte_single
+        self.total_cycles += result.cycles
         return result
 
     # ------------------------------------------------------------------

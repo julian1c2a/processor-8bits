@@ -82,9 +82,10 @@ def show_regs(cpu: CPU, *, file=None):
     """Imprime una línea con todos los registros."""
     f = file or sys.stdout
     I_str = _bold('I:1') if cpu.I else _dim('I:0')
+    cyc_s = _dim(f'  \u2211 {cpu.total_cycles} ciclos')
     line = (f'  A={_cyan(f"{cpu.A:#04x}")}  B={_cyan(f"{cpu.B:#04x}")} '
             f' PC={_cyan(f"{cpu.PC:#06x}")}  SP={_cyan(f"{cpu.SP:#06x}")} '
-            f' LR={_cyan(f"{cpu.LR:#06x}")}  {I_str}\n'
+            f' LR={_cyan(f"{cpu.LR:#06x}")}  {I_str}{cyc_s}\n'
             f'  F={_cyan(f"{cpu.F:#04x}")}  [ {flags_str(cpu.F)} ]')
     print(line, file=f)
 

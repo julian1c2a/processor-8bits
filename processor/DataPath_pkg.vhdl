@@ -145,6 +145,8 @@ package DataPath_pkg is
                                             -- Usados cuando F_Src_Sel='1' (instrucciones ADD16/SUB16)
             F_Src_Sel : in  std_logic;      -- Selección fuente flags: 0=ALU, 1=AddressPath
                                             -- '1' en instrucciones de 16 bits donde los flags vienen del sumador EA
+            Fwd_A_En  : in  std_logic;      -- '1' = ALU usa Fwd_A_Data en lugar de RegA (bypass)
+            Fwd_A_Data: in  data_vector;    -- Valor a reenviar al operando A de la ALU
             FlagsOut  : out status_vector   -- Estado actual del registro F (hacia la UC para ramificaciones)
         );
     end component DataPath_comp;

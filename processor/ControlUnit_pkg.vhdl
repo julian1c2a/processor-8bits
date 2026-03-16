@@ -91,6 +91,14 @@ package ControlUnit_pkg is
         -- Cuando es '1', Flag_Mask y Write_F son ignorados; F se sobreescribe completamente.
         Load_F_Direct : std_logic;
 
+        -- Habilita el camino de forwarding EX→EX para la entrada A de la ALU.
+        -- '1' = la ALU recibe Fwd_A_Data en lugar de RegA como operando A (bypass del banco).
+        -- '0' = comportamiento normal: la ALU lee RegA directamente desde el banco (por defecto).
+        -- Uso previsto: en el futuro, cuando DECODE e EX de instrucciones consecutivas
+        -- de un ciclo puedan solaparse, la UC asertará Fwd_A_En='1' junto con el valor
+        -- a reenviar para eliminar la burbuja RAW entre EX(I) y EX(I+1).
+        Fwd_A_En      : std_logic;
+
         -- Selecciona el dato que DataPath coloca en MemDataOut (bus de datos hacia memoria).
         -- Solo relevante cuando Mem_WE='1' (ciclo de escritura en memoria).
         -- Ver constantes: OUT_SEL_A, OUT_SEL_B, OUT_SEL_ZERO, OUT_SEL_PCL, OUT_SEL_PCH, OUT_SEL_F.
@@ -266,6 +274,10 @@ package ControlUnit_pkg is
 
         -- Load_F_Direct='0': no se carga F directamente; solo activo en POP F.
         Load_F_Direct => '0',
+
+        -- Fwd_A_En='0': forwarding desactivado por defecto; la ALU lee RegA del banco.
+        -- Se activará en v0.8 cuando el pipeline permita solapamiento DECODE+EX.
+        Fwd_A_En      => '0',
 
         -- Out_Sel="000": selecciona R0(A) como dato de salida por defecto.
         -- Inofensivo porque Mem_WE='0'; la memoria no recibe datos en ciclos de fetch.

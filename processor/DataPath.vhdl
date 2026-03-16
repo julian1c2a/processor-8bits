@@ -49,6 +49,13 @@ entity DataPath is
         EA_Flags_In : in status_vector; -- Flags generados por AddressPath
         F_Src_Sel : in  std_logic;      -- Selección fuente flags: 0=ALU, 1=AddressPath
 
+        -- Forwarding EX→EX: camino de bypass para el operando A de la ALU.
+        -- Cuando Fwd_A_En='1', la ALU recibe Fwd_A_Data en lugar de RegA.
+        -- Fwd_A_Data debe ser conectado en el nivel superior (Processor_Top) al valor
+        -- a reenviar (típicamente el último resultado de escritura en A).
+        Fwd_A_En  : in  std_logic;      -- Habilita bypass del banco de registros para operando A
+        Fwd_A_Data: in  data_vector;    -- Valor a reenviar (fuente externa del bypass)
+
         -- Salidas de Estado hacia la UC
         FlagsOut  : out status_vector -- Para saltos condicionales
     );
@@ -112,6 +119,11 @@ architecture unique of DataPath is
     -- del banco de registros y con la entrada de RegF en modo Load_F_Direct.
     signal Bus_Int  : data_vector; -- Bus interno de escritura (resultado mux)
 
+    -- ALU_OpA: operando A seleccionado para la entrada A de la ALU (tras mux de forwarding).
+    -- Fwd_A_En='0': viene de RegA (Registros(0)) → ruta normal del banco de registros.
+    -- Fwd_A_En='1': viene de Fwd_A_Data (bypass externo) → ruta de forwarding EX→EX.
+    signal ALU_OpA  : data_vector; -- Operando A seleccionado (banco o forwarding)
+
     -- ALU_OpB: operando B seleccionado para la entrada B de la ALU.
     -- ALU_Bin_Sel='0': viene de Registers(Reg_Sel) → instrucciones registro-registro.
     -- ALU_Bin_Sel='1': viene del MDR → instrucciones con inmediato #n (ya capturado
@@ -134,13 +146,23 @@ begin
     -- ADC (suma con acarreo) y SBB (resta con préstamo), que leen el carry previo.
     Inst_ALU: ALU_comp
     Port map (
-        RegInA    => RegA,          -- Operando A siempre es el Acumulador (R0)
+        RegInA    => ALU_OpA,       -- Operando A: RegA o Fwd_A_Data (tras mux de forwarding)
         RegInB    => ALU_OpB,       -- Entrada B multiplexada: Rn o MDR (inmediato)
         Oper      => ALU_Op,        -- Código de operación desde la Unidad de Control
         Carry_in  => RegF(idx_fC),  -- Carry actual: necesario para ADC/SBB
         RegOutACC => ALU_Res,       -- Resultado combinacional; se latchea si Write_A/B='1'
         RegStatus => ALU_Stat       -- Flags combinacionales; se latchean si Write_F='1'
     );
+
+    -- =========================================================================
+    -- =========================================================================
+    -- MUX Forwarding: Operando A de la ALU
+    -- =========================================================================
+    -- Selecciona entre el valor actual del banco de registros (RegA) y el valor
+    -- externo de forwarding (Fwd_A_Data) proporcionado por el nivel superior.
+    -- Fwd_A_En='0' → ruta normal (RegA del banco).
+    -- Fwd_A_En='1' → bypass externo (Fwd_A_Data, típicamente el último WB de A).
+    ALU_OpA <= Fwd_A_Data when Fwd_A_En = '1' else RegA;
 
     -- =========================================================================
     -- MUX Operando B de la ALU
