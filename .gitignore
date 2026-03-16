@@ -20,3 +20,5 @@ processor-8bits.*/
 __pycache__/
 *.py[cod]
 sim/__pycache__/
+*.pyc
+*.pyo
