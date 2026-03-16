@@ -19,3 +19,4 @@ processor-8bits.*/
 # Python
 __pycache__/
 *.py[cod]
+sim/__pycache__/
