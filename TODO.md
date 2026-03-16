@@ -1,6 +1,6 @@
 # TODO - Tareas Pendientes del Procesador
 
-Este archivo lista el estado de implementación de la ISA v0.7 en la Unidad de Control (`ControlUnit.vhdl`).
+Este archivo lista el estado de implementación de la ISA v0.8 en la Unidad de Control (`ControlUnit.vhdl`).
 
 ---
 
@@ -18,7 +18,7 @@ Este archivo lista el estado de implementación de la ISA v0.7 en la Unidad de C
   - [x] Sub-FSM DECODE (`dss`) para instrucciones multi-byte (1/2/3 bytes).
   - [x] Sub-FSM EXEC (`ess`) para instrucciones multi-ciclo (CALL, RET, PUSH, POP…).
 
-- [x] **Testbenches de sistema (`Processor_Top_tb.vhdl`) — TB-01 a TB-13: ALL PASS**
+- [x] **Testbenches de sistema (`Processor_Top_tb.vhdl`) — TB-01 a TB-13: ALL PASS (v0.7)**
   - [x] TB-01 @1415ns — Instrucciones unarias (NOT, NEG, INC, DEC, CLR, SET, SWAP).
   - [x] TB-02 @1825ns — ALU registro (ADD, ADC, SUB, SBB, AND, OR, XOR, CMP, MUL, MUH).
   - [x] TB-03 @1345ns — ALU inmediato.
@@ -35,11 +35,55 @@ Este archivo lista el estado de implementación de la ISA v0.7 en la Unidad de C
 
 ---
 
-## Pendiente — Optimizaciones Avanzadas (v0.8+)
+## Completado en v0.8
 
-- [ ] **Forwarding / Bypassing** (v0.8)
-  - [ ] Bypass EX→EX y MEM→EX para eliminar stalls RAW en secuencias A←op(A,B).
-  - [ ] Actualmente se insertan stalls de 1 ciclo por dependencia RAW.
+- [x] **Infraestructura de Forwarding / Bypassing**
+  - [x] Puerto `Fwd_A_En` / `Fwd_A_Data` añadido a `DataPath` y `DataPath_pkg`.
+  - [x] Campo `Fwd_A_En` añadido a `control_bus_t` e `INIT_CTRL_BUS` en `ControlUnit_pkg`.
+  - [x] Señal `s_fwd_a_data` cableada en `Processor_Top` (alimentada desde `RegA`).
+  - [x] Mux de forwarding integrado en el DataPath; transparente por defecto (`Fwd_A_En='0'`).
+
+- [x] **Solapamiento DECODE+EX para instrucciones de 1B/1 ciclo**
+  - [x] Función helper `is_1byte_single_f()` identificando los 32 opcodes elegibles.
+  - [x] Condición DECODE ampliada: acepta avanzar cuando `r_ID_EX.is_single='1'`.
+  - [x] Variable `v_did_decode_1byte` para trigger de captura anticipada del opcode siguiente.
+  - [x] Captura directa de `InstrIn` en `r_IF_ID` tras decodificar instrucción 1B/1ciclo.
+  - [x] `comb_proc` ampliado: pre-fetch solapado en prioridades 2 y 4.
+  - [x] Throughput de **1 ciclo/instrucción** en cadenas consecutivas de ALU registro/unario.
+
+- [x] **Testbenches — TB-01 a TB-13: ALL PASS (v0.8)**
+  - [x] TB-01 @1285ns — Instrucciones unarias (−130 ns respecto a v0.7).
+  - [x] TB-02 @1705ns — ALU registro (−120 ns).
+  - [x] TB-03 @1325ns — ALU inmediato (sin cambio).
+  - [x] TB-04 @1195ns — Desplazamientos y rotaciones (−130 ns).
+  - [x] TB-05 @1755ns — Cargas y almacenamientos (sin cambio significativo).
+  - [x] TB-06 @1465ns — Saltos incondicionales (sin cambio significativo).
+  - [x] TB-07 @2205ns — Saltos condicionales (−310 ns).
+  - [x] TB-08 @995ns  — CALL/RET (sin cambio significativo).
+  - [x] TB-09 @1105ns — PUSH/POP (sin cambio significativo).
+  - [x] TB-10 @935ns  — Stack Pointer (sin cambio).
+  - [x] TB-11 @1495ns — ADD16/SUB16 (sin cambio).
+  - [x] TB-12 @1615ns — Interrupciones IRQ y NMI con RTI (sin cambio).
+  - [x] TB-13 @515ns  — Pipeline hazards (sin cambio).
+
+- [x] **Simulador Python actualizado a v0.8**
+  - [x] Constante `_1BYTE_SINGLE_OPCODES` en `sim/cpu.py` (32 opcodes, espejo de `is_1byte_single_f`).
+  - [x] Estado `_prev_1byte_single` y acumulador `total_cycles` en `CPU`.
+  - [x] Modelo de ciclos: primera instrucción 1B/1ciclo = 2 ciclos; cada siguiente en cadena = 1 ciclo.
+  - [x] `show_regs()` en `sim/display.py` muestra `∑ N ciclos` acumulados.
+  - [x] `_cmd_run()` en `sim/cli.py` imprime resumen de ciclos del programa al finalizar.
+
+- [x] **Documentación**
+  - [x] `processor/ControlUnit.md` — documento técnico completo de la Control Unit.
+  - [x] Archivos `.pyc` eliminados del historial del repositorio; `.gitignore` ya los excluye.
+
+---
+
+## Pendiente — Optimizaciones Avanzadas (v0.9+)
+
+- [ ] **Forwarding activo EX→EX**
+  - [ ] Activar `Fwd_A_En='1'` cuando hay dependencia RAW entre instrucciones `is_single` consecutivas.
+  - [ ] Eliminar el stall restante en secuencias `LD A,#n` → `ADD` (actualmente 1 ciclo de burbuja).
 
 - [ ] **Especulación de Dirección BRAM**
   - [ ] Emitir la dirección al bus en el último ciclo de DECODE para modos `[n]`, `[B]`, stack.
