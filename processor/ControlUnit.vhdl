@@ -363,7 +363,7 @@ begin
     seq_proc : process(clk, reset)
         variable v_raw              : boolean;
         variable v_taken            : boolean;
-        variable v_nop              : ID_EX_reg_t;
+        variable v_new_id_ex        : ID_EX_reg_t;  -- descriptor provisional para detección de forwarding
         variable v_c                : control_bus_t;
         variable v_did_decode_1byte : boolean; -- true cuando se decodificó instrucción de 1B/1ciclo
     begin
@@ -678,7 +678,16 @@ begin
                                          x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"|x"97"|x"98"|x"99"|
                                          x"C0"|x"C1"|x"C2"|x"C3"|x"C4"|x"C5"|x"C6"|x"C7"|
                                          x"C8"|x"C9"|x"CA"|x"CB"|x"CC"|x"CD"|x"CE" =>
-                                        r_ID_EX <= build_1byte_id_ex_f(r_IF_ID.opcode);
+                                        -- Forwarding EX→EX: activo cuando I(n) escribe A y el
+                                        -- siguiente I(n+1) la lee. En el solapamiento DECODE+EX,
+                                        -- ambos ocurren en el mismo flanco: Fwd_A_En='1' confirma
+                                        -- que ALU_OpA debe usar el valor recién escrito (= RegA
+                                        -- tras el flanco), documentando la dependencia RAW.
+                                        v_new_id_ex := build_1byte_id_ex_f(r_IF_ID.opcode);
+                                        if r_ID_EX.writes_a = '1' and v_new_id_ex.reads_a = '1' then
+                                            v_new_id_ex.ctrl.Fwd_A_En := '1';
+                                        end if;
+                                        r_ID_EX <= v_new_id_ex;
                                         r_IF_ID <= NOP_IF_ID;
                                         v_did_decode_1byte := true;
 
@@ -997,12 +1006,18 @@ begin
                 -- r_IF_ID latch stage.
                 -- The r_ID_EX assignment overrides the NOP scheduled by the EXEC block;
                 -- the r_IF_ID <= NOP_IF_ID cancels the fetch scheduled above.
+                -- Forwarding EX→EX (ruta direct-decode): si la instrucción 2B/1ciclo en
+                -- r_ID_EX escribe A y la nueva instrucción 1B la lee, Fwd_A_En='1'.
                 if r_ID_EX.valid = '1' and r_ID_EX.is_single = '1' and
                    r_IF_ID.valid = '0' and
                    dss = DSS_OPCODE and ess = ESS_IDLE and
                    Mem_Ready = '1' and
                    is_1byte_single_f(InstrIn) then
-                    r_ID_EX <= build_1byte_id_ex_f(InstrIn);
+                    v_new_id_ex := build_1byte_id_ex_f(InstrIn);
+                    if r_ID_EX.writes_a = '1' and v_new_id_ex.reads_a = '1' then
+                        v_new_id_ex.ctrl.Fwd_A_En := '1';
+                    end if;
+                    r_ID_EX <= v_new_id_ex;
                     r_IF_ID <= NOP_IF_ID;
                 end if;
 

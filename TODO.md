@@ -109,11 +109,22 @@ Este archivo lista el estado de implementación de la ISA v0.8 en la Unidad de C
 
 ---
 
-## Pendiente — Optimizaciones Avanzadas (v0.10+)
+## Completado en v0.10
 
-- [ ] **Forwarding activo EX→EX**
-  - [ ] Activar `Fwd_A_En='1'` cuando hay dependencia RAW entre instrucciones `is_single` consecutivas.
-  - [ ] Stall RAW restante: `LD A,[n]` → `ADD` (multi-ciclo seguido de lectura del registro escrito).
+- [x] **Forwarding activo EX→EX**
+  - [x] Detección de dependencia RAW A en el bloque DECODE: `r_ID_EX.writes_a = '1'` AND `reads_a_f(I2) = '1'` → `Fwd_A_En='1'` en el ctrl del nuevo r_ID_EX.
+  - [x] Ruta de solapamiento DECODE+EX (DSS_OPCODE compound when): usa variable `v_new_id_ex := build_1byte_id_ex_f(opcode)`, aplica la condición de forwarding, asigna a r_ID_EX.
+  - [x] Ruta direct-decode (bloque post-FETCH): misma detección para la optimización v0.9.
+  - [x] `Fwd_A_Data` ya estaba conectado a `s_DataPath_RegA = RegA` (valor correcto tras el flanco de reloj); el mux `ALU_OpA = Fwd_A_Data if Fwd_A_En='1' else RegA` opera con el valor actualizado en ambos casos → transparente para los tests existentes.
+  - [x] TB-01..13 ALL PASS (timestamps idénticos a v0.9).
+
+---
+
+## Pendiente — Optimizaciones Avanzadas (v0.11+)
+
+- [ ] **Stall RAW restante: LD A,[n] → ADD**
+  - [ ] Permitir FETCH durante los últimos ciclos de ESS para reducir la latencia post-multi-ciclo.
+  - [ ] Actualmente: fin de ESS → FETCH (1 ciclo) → DECODE (1 ciclo) → EXEC. Potencial: solapar FETCH con el último ciclo de ESS.
 
 - [ ] **Especulación de Dirección BRAM**
   - [ ] Emitir la dirección al bus en el último ciclo de DECODE para modos `[n]`, `[B]`, stack.
