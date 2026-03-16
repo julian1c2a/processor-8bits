@@ -270,6 +270,91 @@ architecture pipeline of ControlUnit is
         end case;
     end function;
 
+    -- Build a fully decoded ID_EX_reg_t for a 1-byte single-cycle instruction.
+    -- Called from DSS_OPCODE (normal path) and from the direct-decode block
+    -- (eliminates the bubble after 2-byte single-cycle instructions like LD A,#n).
+    -- Returns NOP_ID_EX for unrecognised opcodes.
+    function build_1byte_id_ex_f(op : data_vector) return ID_EX_reg_t is
+        variable c : control_bus_t := INIT_CTRL_BUS;
+        variable r : ID_EX_reg_t  := NOP_ID_EX;
+    begin
+        r.valid     := '1';
+        r.opcode    := op;
+        r.op1       := x"00";
+        r.op2       := x"00";
+        r.is_single := '1';
+        r.is_multi  := '0';
+        case op is
+            when x"00" =>                          -- NOP
+                r.ctrl     := INIT_CTRL_BUS;
+                r.writes_a := '0'; r.writes_b := '0';
+                r.reads_a  := '0'; r.reads_b  := '0';
+            when x"02" =>                          -- SEC: OP_CMP sets Carry via Flag_Mask
+                c := INIT_CTRL_BUS;
+                c.ALU_Op    := OP_CMP;
+                c.Reg_Sel   := (others => '0');
+                c.Bus_Op    := ACC_ALU_elected;
+                c.Write_F   := '1';
+                c.Flag_Mask := x"80";
+                r.ctrl     := c;
+                r.writes_a := '0'; r.writes_b := '0';
+                r.reads_a  := '1'; r.reads_b  := '0';
+            when x"03" =>                          -- CLC: OP_AND clears Carry via Flag_Mask
+                c := INIT_CTRL_BUS;
+                c.ALU_Op    := OP_AND;
+                c.Reg_Sel   := (others => '0');
+                c.Bus_Op    := ACC_ALU_elected;
+                c.Write_F   := '1';
+                c.Flag_Mask := x"80";
+                r.ctrl     := c;
+                r.writes_a := '0'; r.writes_b := '0';
+                r.reads_a  := '1'; r.reads_b  := '0';
+            when x"04" | x"05" =>                 -- SEI / CLI: I_Flag updated in EX stage
+                r.ctrl     := INIT_CTRL_BUS;
+                r.writes_a := '0'; r.writes_b := '0';
+                r.reads_a  := '0'; r.reads_b  := '0';
+            when x"10" =>                          -- LD A,B
+                c := INIT_CTRL_BUS;
+                c.ALU_Op  := OP_PSB;
+                c.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
+                c.Bus_Op  := ACC_ALU_elected;
+                c.Write_A := '1';
+                c.Write_F := '1';
+                c.Flag_Mask(idx_fZ) := '1';
+                r.ctrl     := c;
+                r.writes_a := '1'; r.writes_b := '0';
+                r.reads_a  := '0'; r.reads_b  := '1';
+            when x"20" =>                          -- LD B,A
+                c := INIT_CTRL_BUS;
+                c.ALU_Op  := OP_PSA;
+                c.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
+                c.Bus_Op  := ACC_ALU_elected;
+                c.Write_B := '1';
+                r.ctrl     := c;
+                r.writes_a := '0'; r.writes_b := '1';
+                r.reads_a  := '1'; r.reads_b  := '0';
+            when x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"|x"97"|x"98"|x"99" => -- ALU reg / MUL / MUH
+                c := build_alu_reg(op);
+                r.ctrl     := c;
+                r.reads_a  := '1'; r.reads_b  := '1';
+                if op = x"98" or op = x"99" then
+                    r.writes_a := '1'; r.writes_b := '0'; -- MUL/MUH always write A
+                else
+                    r.writes_a := c.Write_A; r.writes_b := '0';
+                end if;
+            when x"C0"|x"C1"|x"C2"|x"C3"|x"C4"|x"C5"|x"C6"|x"C7"|
+                 x"C8"|x"C9"|x"CA"|x"CB"|x"CC"|x"CD"|x"CE" =>        -- ALU unary
+                c := build_alu_unary(op);
+                r.ctrl     := c;
+                r.writes_a := c.Write_A; r.writes_b := c.Write_B;
+                r.reads_a  := reads_a_f(op);
+                r.reads_b  := reads_b_f(op);
+            when others =>
+                r := NOP_ID_EX;
+        end case;
+        return r;
+    end function;
+
 begin
 
     -- =========================================================================
@@ -586,55 +671,14 @@ begin
                             when DSS_OPCODE =>
                                 case r_IF_ID.opcode is
 
-                                    -- NOP
-                                    when x"00" =>
-                                        r_ID_EX <= (valid=>'1', opcode=>x"00",
-                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
-                                            writes_a=>'0', writes_b=>'0',
-                                            reads_a=>'0', reads_b=>'0',
-                                            is_single=>'1', is_multi=>'0');
-                                        r_IF_ID <= NOP_IF_ID;
-                                        v_did_decode_1byte := true;
-
-                                    -- SEC
-                                    when x"02" =>
-                                        v_c := INIT_CTRL_BUS;
-                                        v_c.ALU_Op    := OP_CMP;
-                                        v_c.Reg_Sel   := (others => '0');
-                                        v_c.Bus_Op    := ACC_ALU_elected;
-                                        v_c.Write_F   := '1';
-                                        v_c.Flag_Mask := x"80";
-                                        r_ID_EX <= (valid=>'1', opcode=>x"02",
-                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
-                                            writes_a=>'0', writes_b=>'0',
-                                            reads_a=>'1', reads_b=>'0',
-                                            is_single=>'1', is_multi=>'0');
-                                        r_IF_ID <= NOP_IF_ID;
-                                        v_did_decode_1byte := true;
-
-                                    -- CLC
-                                    when x"03" =>
-                                        v_c := INIT_CTRL_BUS;
-                                        v_c.ALU_Op    := OP_AND;
-                                        v_c.Reg_Sel   := (others => '0');
-                                        v_c.Bus_Op    := ACC_ALU_elected;
-                                        v_c.Write_F   := '1';
-                                        v_c.Flag_Mask := x"80";
-                                        r_ID_EX <= (valid=>'1', opcode=>x"03",
-                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
-                                            writes_a=>'0', writes_b=>'0',
-                                            reads_a=>'1', reads_b=>'0',
-                                            is_single=>'1', is_multi=>'0');
-                                        r_IF_ID <= NOP_IF_ID;
-                                        v_did_decode_1byte := true;
-
-                                    -- SEI / CLI: NOP ctrl, I_Flag updated in EX stage
-                                    when x"04" | x"05" =>
-                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
-                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
-                                            writes_a=>'0', writes_b=>'0',
-                                            reads_a=>'0', reads_b=>'0',
-                                            is_single=>'1', is_multi=>'0');
+                                    -- 1-byte single-cycle instructions: NOP, SEC, CLC,
+                                    -- SEI, CLI, LD A,B, LD B,A, ALU reg (0x90..0x99),
+                                    -- ALU unary (0xC0..0xCE).
+                                    when x"00"|x"02"|x"03"|x"04"|x"05"|x"10"|x"20"|
+                                         x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"|x"97"|x"98"|x"99"|
+                                         x"C0"|x"C1"|x"C2"|x"C3"|x"C4"|x"C5"|x"C6"|x"C7"|
+                                         x"C8"|x"C9"|x"CA"|x"CB"|x"CC"|x"CD"|x"CE" =>
+                                        r_ID_EX <= build_1byte_id_ex_f(r_IF_ID.opcode);
                                         r_IF_ID <= NOP_IF_ID;
                                         v_did_decode_1byte := true;
 
@@ -655,38 +699,6 @@ begin
                                             reads_a=>'0', reads_b=>'0',
                                             is_single=>'0', is_multi=>'1');
                                         r_IF_ID <= NOP_IF_ID;
-
-                                    -- LD A,B (0x10)
-                                    when x"10" =>
-                                        v_c := INIT_CTRL_BUS;
-                                        v_c.ALU_Op  := OP_PSB;
-                                        v_c.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
-                                        v_c.Bus_Op  := ACC_ALU_elected;
-                                        v_c.Write_A := '1';
-                                        v_c.Write_F := '1';
-                                        v_c.Flag_Mask(idx_fZ) := '1';
-                                        r_ID_EX <= (valid=>'1', opcode=>x"10",
-                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
-                                            writes_a=>'1', writes_b=>'0',
-                                            reads_a=>'0', reads_b=>'1',
-                                            is_single=>'1', is_multi=>'0');
-                                        r_IF_ID <= NOP_IF_ID;
-                                        v_did_decode_1byte := true;
-
-                                    -- LD B,A (0x20)
-                                    when x"20" =>
-                                        v_c := INIT_CTRL_BUS;
-                                        v_c.ALU_Op  := OP_PSA;
-                                        v_c.Reg_Sel := std_logic_vector(to_unsigned(1, REG_SEL_WIDTH));
-                                        v_c.Bus_Op  := ACC_ALU_elected;
-                                        v_c.Write_B := '1';
-                                        r_ID_EX <= (valid=>'1', opcode=>x"20",
-                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
-                                            writes_a=>'0', writes_b=>'1',
-                                            reads_a=>'1', reads_b=>'0',
-                                            is_single=>'1', is_multi=>'0');
-                                        r_IF_ID <= NOP_IF_ID;
-                                        v_did_decode_1byte := true;
 
                                     -- LD A,[B] (0x14): multi-cycle, 1-byte
                                     when x"14" =>
@@ -715,40 +727,8 @@ begin
                                             is_single=>'0', is_multi=>'1');
                                         r_IF_ID <= NOP_IF_ID;
 
-                                    -- ALU reg ops (0x90..0x97): single-cycle
-                                    when x"90"|x"91"|x"92"|x"93"|x"94"|x"95"|x"96"|x"97" =>
-                                        v_c := build_alu_reg(r_IF_ID.opcode);
-                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
-                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
-                                            writes_a=>v_c.Write_A, writes_b=>'0',
-                                            reads_a=>'1', reads_b=>'1',
-                                            is_single=>'1', is_multi=>'0');
-                                        r_IF_ID <= NOP_IF_ID;
-                                        v_did_decode_1byte := true;
-
-                                    -- MUL/MUH (0x98..0x99): single-cycle, A = A×B low/high
-                                    when x"98"|x"99" =>
-                                        v_c := build_alu_reg(r_IF_ID.opcode);
-                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
-                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
-                                            writes_a=>'1', writes_b=>'0',
-                                            reads_a=>'1', reads_b=>'1',
-                                            is_single=>'1', is_multi=>'0');
-                                        r_IF_ID <= NOP_IF_ID;
-                                        v_did_decode_1byte := true;
-
-                                    -- ALU unary ops (0xC0..0xCE): single-cycle
-                                    when x"C0"|x"C1"|x"C2"|x"C3"|x"C4"|x"C5"|x"C6"|x"C7"|
-                                         x"C8"|x"C9"|x"CA"|x"CB"|x"CC"|x"CD"|x"CE" =>
-                                        v_c := build_alu_unary(r_IF_ID.opcode);
-                                        r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
-                                            op1=>x"00", op2=>x"00", ctrl=>v_c,
-                                            writes_a=>v_c.Write_A, writes_b=>v_c.Write_B,
-                                            reads_a=>reads_a_f(r_IF_ID.opcode),
-                                            reads_b=>reads_b_f(r_IF_ID.opcode),
-                                            is_single=>'1', is_multi=>'0');
-                                        r_IF_ID <= NOP_IF_ID;
-                                        v_did_decode_1byte := true;
+                                    -- ALU reg ops (0x90..0x99): handled by compound when above
+                                    -- ALU unary ops (0xC0..0xCE): handled by compound when above
 
                                     -- PUSH * (0x60..0x63): multi-cycle, 1-byte
                                     when x"60"|x"61"|x"62"|x"63" =>
@@ -1006,6 +986,24 @@ begin
                     if Mem_Ready = '1' then
                         r_IF_ID <= (valid => '1', opcode => InstrIn);
                     end if;
+                end if;
+
+                -- Direct-decode from InstrIn: eliminates the 1-cycle bubble that
+                -- occurs after any 2-byte single-cycle instruction (LD A,#n, ALU imm,
+                -- etc.).  When EX is consuming a single-cycle instruction, comb_proc
+                -- Priority 2 has already overlaid a fetch so InstrIn holds the next
+                -- opcode.  If that opcode is a 1-byte single-cycle instruction and
+                -- r_IF_ID is empty, decode it directly into r_ID_EX, bypassing the
+                -- r_IF_ID latch stage.
+                -- The r_ID_EX assignment overrides the NOP scheduled by the EXEC block;
+                -- the r_IF_ID <= NOP_IF_ID cancels the fetch scheduled above.
+                if r_ID_EX.valid = '1' and r_ID_EX.is_single = '1' and
+                   r_IF_ID.valid = '0' and
+                   dss = DSS_OPCODE and ess = ESS_IDLE and
+                   Mem_Ready = '1' and
+                   is_1byte_single_f(InstrIn) then
+                    r_ID_EX <= build_1byte_id_ex_f(InstrIn);
+                    r_IF_ID <= NOP_IF_ID;
                 end if;
 
                 -- Interrupt check: taken when pipeline is fully idle

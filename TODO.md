@@ -79,11 +79,41 @@ Este archivo lista el estado de implementación de la ISA v0.8 en la Unidad de C
 
 ---
 
-## Pendiente — Optimizaciones Avanzadas (v0.9+)
+## Completado en v0.9
+
+- [x] **Direct-decode desde InstrIn — eliminación de burbuja post-2-byte-single**
+  - [x] Función `build_1byte_id_ex_f()` para decodificar los 32 opcodes 1B/1ciclo en un solo paso.
+  - [x] Refactor DSS_OPCODE: 12 `when` individuales reemplazados por un `when` compuesto + llamada a la función.
+  - [x] Bloque "direct-decode from InstrIn": cuando EX ejecuta una instrucción `is_single` y `r_IF_ID` está vacío (situación post-2-byte), y el opcode en `InstrIn` es `is_1byte_single`, se decodifica directamente en `r_ID_EX` sin pasar por el latch `r_IF_ID`. Eliminación de **1 ciclo de burbuja** en cada secuencia 2B/1ciclo → 1B/1ciclo.
+  - [x] Instrucciones cubiertas como "2-byte single" que activan la optimización: `LD A,#n` (0x11), `LD B,#n` (0x21), ALU inmediato `0xA0..0xA7`.
+
+- [x] **Testbenches — TB-01 a TB-13: ALL PASS (v0.9)**
+  - [x] TB-01 @1285ns — Instrucciones unarias (=v0.8, sin secuencias 2B→1B en este test).
+  - [x] TB-02 @1705ns — ALU registro (=v0.8).
+  - [x] TB-03 @1325ns — ALU inmediato (=v0.8).
+  - [x] TB-04 @1195ns — Desplazamientos y rotaciones (=v0.8).
+  - [x] TB-05 @1755ns — Cargas y almacenamientos (=v0.8).
+  - [x] TB-06 @1465ns — Saltos incondicionales (=v0.8).
+  - [x] TB-07 @2205ns — Saltos condicionales (=v0.8).
+  - [x] TB-08 @995ns  — CALL/RET (=v0.8).
+  - [x] TB-09 @1105ns — PUSH/POP (=v0.8).
+  - [x] TB-10 @935ns  — Stack Pointer (=v0.8).
+  - [x] TB-11 @1495ns — ADD16/SUB16 (=v0.8).
+  - [x] TB-12 @1615ns — Interrupciones IRQ y NMI con RTI (=v0.8).
+  - [x] TB-13 @515ns  — Pipeline hazards (=v0.8).
+
+- [x] **Simulador Python actualizado a v0.9**
+  - [x] Constante `_2BYTE_SINGLE_OPCODES` en `sim/cpu.py`: `0x11`, `0x21`, `0xA0..0xA7`.
+  - [x] Estado `_prev_2byte_single` en `CPU.soft_reset()`.
+  - [x] Modelo de ciclos extendido: instrucción 1B/1ciclo tras 2B/1ciclo también cuesta 1 ciclo.
+
+---
+
+## Pendiente — Optimizaciones Avanzadas (v0.10+)
 
 - [ ] **Forwarding activo EX→EX**
   - [ ] Activar `Fwd_A_En='1'` cuando hay dependencia RAW entre instrucciones `is_single` consecutivas.
-  - [ ] Eliminar el stall restante en secuencias `LD A,#n` → `ADD` (actualmente 1 ciclo de burbuja).
+  - [ ] Stall RAW restante: `LD A,[n]` → `ADD` (multi-ciclo seguido de lectura del registro escrito).
 
 - [ ] **Especulación de Dirección BRAM**
   - [ ] Emitir la dirección al bus en el último ciclo de DECODE para modos `[n]`, `[B]`, stack.

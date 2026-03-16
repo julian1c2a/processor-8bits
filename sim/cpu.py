@@ -29,6 +29,13 @@ _1BYTE_SINGLE_OPCODES = frozenset([
     *range(0xC0, 0xCF),             # NOT NEG INC DEC CLR SET LSL LSR ASL ASR ROL ROR SWAP
 ])
 
+# Opcodes de 2 bytes / 1 ciclo EX: tras ellos, la siguiente instrucción 1B/1ciclo
+# se decodifica directamente (direct-decode v0.9) y cuesta también 1 ciclo.
+_2BYTE_SINGLE_OPCODES = frozenset([
+    0x11, 0x21,                       # LD A,#n  /  LD B,#n
+    *range(0xA0, 0xA8),              # ADD ADC SUB SBB AND OR XOR CMP (inmediato)
+])
+
 
 @dataclass
 class StepResult:
@@ -65,8 +72,9 @@ class CPU:
         self.halted:  bool = False
         self._pending_irq: bool = False
         self._pending_nmi: bool = False
-        self.total_cycles:       int  = 0
-        self._prev_1byte_single: bool = False
+        self.total_cycles:        int  = 0
+        self._prev_1byte_single:  bool = False
+        self._prev_2byte_single:  bool = False
 
     def hard_reset(self):
         """Reinicia todo, incluyendo memoria y E/S."""
@@ -691,9 +699,11 @@ class CPU:
             nn=fetch16(); mnemonic=f'CALL LR, {nn:#06x}'
             self.LR=self.PC; self.PC=nn; cycles=3
 
-        # Solapamiento DECODE+EX (v0.8): instrucciones 1B/1-ciclo consecutivas → 1 ciclo
+        # Solapamiento DECODE+EX (v0.8): 1B/1ciclo tras 1B/1ciclo → 1 ciclo
+        # Direct-decode  (v0.9): 1B/1ciclo tras 2B/1ciclo → también 1 ciclo
         _is_1byte_single = opcode in _1BYTE_SINGLE_OPCODES
-        if _is_1byte_single and self._prev_1byte_single:
+        _is_2byte_single = opcode in _2BYTE_SINGLE_OPCODES
+        if _is_1byte_single and (self._prev_1byte_single or self._prev_2byte_single):
             cycles = 1
 
         # -------------------------------------------------------
@@ -708,6 +718,7 @@ class CPU:
         result.mem_diff = mem_diff
         result.io_diff  = io_diff
         self._prev_1byte_single = _is_1byte_single
+        self._prev_2byte_single = _is_2byte_single
         self.total_cycles += result.cycles
         return result
 
