@@ -447,10 +447,22 @@ begin
                         else                      ess <= ESS_CALL_6; end if;
                     when ESS_CALL_6 => ess <= ESS_IDLE;    -- PC ← TMP (salto al destino)
 
+                    -- CALL LR,nn (1 ciclo): LR ← PC (ret addr), PC ← TMP (destino)
+                    when ESS_CALL_LR => ess <= ESS_IDLE;
+
                     -- Cadena RET (3 ciclos): pop PC_L / pop PC_H / PC←TMP + SP+=2
                     when ESS_RET_1 => ess <= ESS_RET_2;
                     when ESS_RET_2 => ess <= ESS_RET_3;
                     when ESS_RET_3 => ess <= ESS_IDLE;
+
+                    -- RET LR (1 ciclo): PC ← LR (sin memoria)
+                    when ESS_RET_LR => ess <= ESS_IDLE;
+
+                    -- Cadena BSR rel8 (4 ciclos): SP-- / push PC_L / push PC_H / PC←PC+rel8
+                    when ESS_BSR_1 => ess <= ESS_BSR_2;
+                    when ESS_BSR_2 => ess <= ESS_BSR_3;
+                    when ESS_BSR_3 => ess <= ESS_BSR_4;
+                    when ESS_BSR_4 => ess <= ESS_IDLE;
 
                     -- Cadena RTI (4 ciclos): pop F / pop PC_L / pop PC_H / PC←TMP
                     when ESS_RTI_1 => ess <= ESS_RTI_2;
@@ -555,6 +567,7 @@ begin
                             when x"33"|x"42"             => ess <= ESS_ST_IDX;
                             when x"70"                   => ess <= ESS_JP_3;
                             when x"75"|x"76"             => ess <= ESS_CALL_3;
+                            when x"F2"                   => ess <= ESS_CALL_LR; -- CALL LR,nn
                             when x"50"                   => ess <= ESS_LDSP_2;
                             when x"E1"|x"E3"             => ess <= ESS_OP16_WB1;
                             when others                  => ess <= ESS_IDLE;
@@ -618,6 +631,9 @@ begin
                             -- dispatches to ESS_CALL_3 (SP--, push PC, jump to TMP).
                             when x"75"|x"76"             => ess <= ESS_TMP_FROM_OP1;
                             when x"77"             => ess <= ESS_RET_1;
+                            when x"F0"             => ess <= ESS_BSR_1;        -- BSR rel8
+                            when x"F1"             => ess <= ESS_RET_LR;       -- RET LR
+                            when x"F2"             => ess <= ESS_TMP_FROM_OP1; -- CALL LR,nn (3-byte)
                             -- IN/OUT with immediate port: op1 = port number.
                             -- ESS_TMP_FROM_OP1 loads TMP_L = port, TMP_H = 0.
                             when x"D0"|x"D2"             => ess <= ESS_TMP_FROM_OP1;
@@ -855,9 +871,31 @@ begin
                                     when x"13"|x"23"|x"15"|x"25"|
                                          x"31"|x"33"|x"41"|x"42"|
                                          x"50"|x"70"|x"73"|x"75"|x"76"|
-                                         x"E1"|x"E3" =>
+                                         x"E1"|x"E3"|
+                                         x"F2" =>              -- CALL LR, nn (3-byte)
                                         dss <= DSS_OP1;
                                         -- Hold r_IF_ID, start OP1 fetch
+
+                                    -- RET LR (0xF1): 1-byte, multi-cycle (PC ← LR via ESS_RET_LR)
+                                    when x"F1" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>x"F1",
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
+
+                                    -- BSR rel8 (0xF0): 2-byte; offset implícito en DataIn
+                                    -- (el FETCH del ciclo DECODE lee el offset byte; los ciclos de
+                                    --  WRITE de ESS_BSR no actualizan el BRAM output register,
+                                    --  por lo que DataIn conserva el offset hasta ESS_BSR_4)
+                                    when x"F0" =>
+                                        r_ID_EX <= (valid=>'1', opcode=>x"F0",
+                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
+                                            writes_a=>'0', writes_b=>'0',
+                                            reads_a=>'0', reads_b=>'0',
+                                            is_single=>'0', is_multi=>'1');
+                                        r_IF_ID <= NOP_IF_ID;
 
                                     when others =>
                                         -- Unknown: NOP
@@ -1248,7 +1286,7 @@ begin
 
                 when ESS_CALL_6 =>
                     -- Ciclo 6/6: carga PC desde TMP (salto al inicio de la rutina).
-                    v_ctrl.Load_Src_Sel := '1'; -- TMP
+                    v_ctrl.Load_Src_Sel := LOAD_SRC_TMP; -- TMP
                     v_ctrl.PC_Op        := PC_OP_LOAD;
 
                 when ESS_RET_1 =>
@@ -1269,7 +1307,7 @@ begin
 
                 when ESS_RET_3 =>
                     -- Ciclo 3/3: PC ← TMP (retorno); SP += 2 (libera los 2 bytes del stack).
-                    v_ctrl.Load_Src_Sel := '1'; -- TMP
+                    v_ctrl.Load_Src_Sel := LOAD_SRC_TMP; -- TMP
                     v_ctrl.PC_Op        := PC_OP_LOAD;
                     v_ctrl.SP_Op        := SP_OP_INC;
 
@@ -1362,7 +1400,7 @@ begin
 
                 when ESS_INT_9 =>
                     -- Ciclo 9/9: PC ← TMP (salta al handler); seq_proc limpia I_Flag y handling_nmi.
-                    v_ctrl.Load_Src_Sel := '1'; -- TMP
+                    v_ctrl.Load_Src_Sel := LOAD_SRC_TMP; -- TMP
                     v_ctrl.PC_Op        := PC_OP_LOAD;
 
                 when ESS_BRANCH_2 =>
@@ -1376,7 +1414,7 @@ begin
                 when ESS_JP_3 =>
                     -- Ciclo final de salto absoluto: PC ← TMP (16 bits ya en TMP).
                     -- Compartido por JP nn, CALL, RET, RTI e INT.
-                    v_ctrl.Load_Src_Sel := '1'; -- TMP
+                    v_ctrl.Load_Src_Sel := LOAD_SRC_TMP; -- TMP
                     v_ctrl.PC_Op        := PC_OP_LOAD;
                     -- RET y RTI: también restauran SP (manejado en RET_3, no aquí)
 
@@ -1390,13 +1428,13 @@ begin
                 when ESS_JPN_2 =>
                     -- Ciclo único: carga solo el byte bajo del PC desde TMP_L (salto pág. cero).
                     -- PC_H permanece sin cambio; efecto = salto dentro de la misma página.
-                    v_ctrl.Load_Src_Sel := '1'; -- TMP
+                    v_ctrl.Load_Src_Sel := LOAD_SRC_TMP; -- TMP
                     v_ctrl.PC_Op        := PC_OP_LOAD_L;
 
                 when ESS_IND_LOAD =>
                     -- Ciclo 1/3 de salto indirecto: PC ← TMP (apunta al puntero en memoria).
                     -- Los dos ciclos siguientes leen los 2 bytes del puntero destino.
-                    v_ctrl.Load_Src_Sel := '1'; -- TMP
+                    v_ctrl.Load_Src_Sel := LOAD_SRC_TMP; -- TMP
                     v_ctrl.PC_Op        := PC_OP_LOAD;
 
                 when ESS_IND_READ_L =>
@@ -1489,7 +1527,7 @@ begin
                     --   LD SP,A:B (0x51): LDSP_AB→LDSP_2 → SP ← A:B (calcula EA)
                     if r_exec_IR = x"50" then
                         -- Ciclo 2/2 (LD SP,nn): SP ← TMP (valor completo en TMP).
-                        v_ctrl.Load_Src_Sel := '1'; -- TMP
+                        v_ctrl.Load_Src_Sel := LOAD_SRC_TMP; -- TMP
                     else
                         -- Ciclo único (LD SP,A:B): SP ← A:B usando el sumador EA.
                         v_ctrl.EA_A_Sel     := EA_A_SRC_REG_AB;
@@ -1584,6 +1622,61 @@ begin
                     v_ctrl.Op_Data    := r_exec_op2;
                     v_ctrl.Op_Sel     := '1';
                     v_ctrl.Load_TMP_H := '1';
+
+                -- -------------------------------------------------------
+                -- BSR rel8 — 4 ciclos (v0.11)
+                -- -------------------------------------------------------
+
+                when ESS_BSR_1 =>
+                    -- Ciclo 1/4: SP -= 2; captura dirección de retorno en LR.
+                    -- r_PC en este momento = dirección de retorno (opcode_addr + 2,
+                    -- ya que PC se incrementó al fetchar el opcode y el offset byte).
+                    v_ctrl.SP_Op   := SP_OP_DEC;
+                    v_ctrl.Load_LR := '1'; -- LR ← r_PC (= ret_addr)
+
+                when ESS_BSR_2 =>
+                    -- Ciclo 2/4: escribe PCL (byte bajo de ret_addr) en mem[SP].
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.Mem_WE    := '1';
+                    v_ctrl.Out_Sel   := OUT_SEL_PCL;
+                    v_ctrl.SP_Offset := '0';
+                    v_needs_mem := true;
+
+                when ESS_BSR_3 =>
+                    -- Ciclo 3/4: escribe PCH (byte alto de ret_addr) en mem[SP+1].
+                    v_ctrl.ABUS_Sel  := ABUS_SRC_SP;
+                    v_ctrl.Mem_WE    := '1';
+                    v_ctrl.Out_Sel   := OUT_SEL_PCH;
+                    v_ctrl.SP_Offset := '1';
+                    v_needs_mem := true;
+
+                when ESS_BSR_4 =>
+                    -- Ciclo 4/4: PC ← PC + rel8.
+                    -- El byte de offset sigue disponible en DataIn (los ciclos de
+                    -- escritura ESS_BSR_2/3 no actualizan el BRAM output register).
+                    v_ctrl.EA_A_Sel     := EA_A_SRC_PC;
+                    v_ctrl.EA_B_Sel     := EA_B_SRC_DATA_IN;
+                    v_ctrl.Load_Src_Sel := LOAD_SRC_ALU_RES;
+                    v_ctrl.PC_Op        := PC_OP_LOAD;
+
+                -- -------------------------------------------------------
+                -- CALL LR, nn — 1 ciclo ESS (v0.11)
+                -- -------------------------------------------------------
+                when ESS_CALL_LR =>
+                    -- Ciclo único: LR ← r_PC (dirección de retorno = instr+3, ya
+                    -- incrementado por los ciclos DSS); PC ← TMP (destino).
+                    -- VHDL non-blocking: ambos usan el valor OLD de r_PC → correcto.
+                    v_ctrl.Load_LR      := '1';
+                    v_ctrl.Load_Src_Sel := LOAD_SRC_TMP;
+                    v_ctrl.PC_Op        := PC_OP_LOAD;
+
+                -- -------------------------------------------------------
+                -- RET LR — 1 ciclo ESS (v0.11)
+                -- -------------------------------------------------------
+                when ESS_RET_LR =>
+                    -- Ciclo único: PC ← LR. Sin acceso a memoria.
+                    v_ctrl.Load_Src_Sel := LOAD_SRC_LR;
+                    v_ctrl.PC_Op        := PC_OP_LOAD;
 
                 when ESS_IDLE =>
                     null;

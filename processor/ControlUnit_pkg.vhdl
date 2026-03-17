@@ -146,10 +146,11 @@ package ControlUnit_pkg is
         -- Tras activar Load_TMP_H el registro TMP contiene la dirección de 16 bits completa.
         Load_TMP_H  : std_logic;
 
-        -- Selecciona si PC o SP se cargan desde el sumador EA o desde el registro TMP.
-        -- '0' = LOAD_SRC_ALU_RES: carga desde el resultado del sumador EA (saltos relativos).
-        -- '1' = LOAD_SRC_DATA_IN: carga desde TMP ensamblado byte a byte (saltos absolutos, LD SP).
-        Load_Src_Sel: std_logic;
+        -- Selecciona la fuente de 16 bits para cargar PC o SP:
+        -- "00" LOAD_SRC_ALU_RES: EA_Adder_Res (saltos relativos, BSR, LD SP A:B).
+        -- "01" LOAD_SRC_TMP    : TMP ensamblado byte a byte (saltos absolutos, CALL, LD SP,#nn).
+        -- "10" LOAD_SRC_LR     : Link Register (RET LR — sin acceso a memoria).
+        Load_Src_Sel: std_logic_vector(1 downto 0);
 
         -- Offset para el acceso al Stack Pointer en modo Little-Endian.
         -- '0' = accede a la dirección SP (byte bajo de la palabra en pila).

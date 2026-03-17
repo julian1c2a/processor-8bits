@@ -42,8 +42,8 @@ entity AddressPath is
         Load_TMP_L: in  std_logic; -- '1' = cargar parte baja (bits 7..0) de TMP desde DataIn
         Load_TMP_H: in  std_logic; -- '1' = cargar parte alta (bits 15..8) de TMP desde DataIn
 
-        -- Selección de fuente para cargar PC/SP/LR (Calculado vs Dato directo)
-        Load_Src_Sel : in std_logic; -- 0=EA_Adder_Res (salto relativo PC+rel8), 1=TMP (dirección absoluta ensamblada desde bus de 8 bits)
+        -- Selección de fuente para cargar PC/SP/LR ("00"=EA_Adder, "01"=TMP, "10"=LR)
+        Load_Src_Sel : in std_logic_vector(1 downto 0); -- "00"=EA_Adder_Res; "01"=TMP; "10"=Link Register
         SP_Offset    : in std_logic; -- 0=SP (acceso al byte bajo de la palabra en pila), 1=SP+1 (byte alto, little-endian)
         Force_ZP     : in std_logic; -- 1=Forzar MSB del AddressBus a 0x00 (wrapping a página cero, 8-bit address space)
 
@@ -212,8 +212,9 @@ begin
     --     → usado en saltos ABSOLUTOS (JP nn, CALL nn) donde los dos bytes de
     --       la dirección destino se han leído del bus de datos en ciclos previos
     --       y ensamblado en r_TMP byte a byte.
-    Mux_Load_Data <= EA_Adder_Res when Load_Src_Sel = LOAD_SRC_ALU_RES else -- Salto relativo: PC + rel8
-                     r_TMP;                                                   -- Salto absoluto: dirección de TMP
+    Mux_Load_Data <= r_LR        when Load_Src_Sel = LOAD_SRC_LR      else -- RET LR: Link Register
+                     r_TMP        when Load_Src_Sel = LOAD_SRC_TMP     else -- Salto absoluto: TMP
+                     EA_Adder_Res;                                           -- Salto relativo: EA_Adder_Res
 
     -- ========================================================================
     -- 3. Registros y Lógica Secuencial

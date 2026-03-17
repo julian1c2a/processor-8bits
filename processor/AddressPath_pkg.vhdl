@@ -128,13 +128,17 @@ package AddressPath_pkg is
 
     -- Fuente = resultado del sumador EA (para saltos relativos PC+rel8).
     -- El sumador calcula PC + desplazamiento con signo de 8 bits extendido a 16.
-    -- Usado en instrucciones de salto relativo (BEQ, BNE, BCC, BCS, etc.).
-    constant LOAD_SRC_ALU_RES : std_logic := '0'; -- Resultado calculado (saltos relativos, EA)
+    -- Usado en instrucciones de salto relativo (BEQ, BNE, BCC, BCS, BSR, etc.).
+    constant LOAD_SRC_ALU_RES : std_logic_vector(1 downto 0) := "00"; -- EA_Adder_Res (saltos relativos)
 
     -- Fuente = registro TMP (dirección de 16 bits ensamblada byte a byte desde DataIn).
     -- El TMP se carga en dos ciclos: primero Load_TMP_L (byte bajo), luego Load_TMP_H (byte alto).
-    -- Usado en instrucciones de carga directa de 16 bits (JMP abs, CALL abs, LD SP,#nn).
-    constant LOAD_SRC_DATA_IN : std_logic := '1'; -- Dato directo (LD SP, #nnnn)
+    -- Usado en instrucciones de carga directa de 16 bits (JP nn, CALL nn, LD SP,#nn, CALL LR,nn).
+    constant LOAD_SRC_TMP     : std_logic_vector(1 downto 0) := "01"; -- TMP (saltos absolutos)
+    constant LOAD_SRC_DATA_IN : std_logic_vector(1 downto 0) := "01"; -- Alias de LOAD_SRC_TMP (compatibilidad)
+
+    -- Fuente = Link Register (para RET LR: PC <- LR sin acceso a memoria).
+    constant LOAD_SRC_LR      : std_logic_vector(1 downto 0) := "10"; -- Link Register (RET LR)
 
     -- =========================================================================
     -- Selección de fuentes para el sumador EA (Effective Address Adder)
@@ -227,7 +231,7 @@ package AddressPath_pkg is
             Load_EAR  : in  std_logic;                             -- '1' = capturar resultado EA en EAR (estabiliza dirección LD/ST)
             Load_TMP_L: in  std_logic;                             -- '1' = cargar DataIn en TMP[7:0] (byte bajo de dirección de 16 bits)
             Load_TMP_H: in  std_logic;                             -- '1' = cargar DataIn en TMP[15:8] (byte alto de dirección de 16 bits)
-            Load_Src_Sel : in std_logic;                           -- '0'=cargar desde sumador EA; '1'=cargar desde TMP
+            Load_Src_Sel : in std_logic_vector(1 downto 0);        -- "00"=EA_Adder; "01"=TMP; "10"=LR (RET LR)
             Clear_TMP : in  std_logic;                             -- '1' = forzar TMP a 0x0000 (inicio de ensamblaje o página cero)
             SP_Offset : in  std_logic;                             -- '0'=acceder a SP; '1'=acceder a SP+1 (byte alto, Little-Endian)
             Force_ZP  : in  std_logic;                             -- '1' = forzar MSB de dirección EA a 0x00 (modo página cero, wrap 8 bits)

@@ -137,7 +137,15 @@ package Pipeline_pkg is
         -- Used by 3-byte instructions (LD/ST [nn], JP nn, etc.) to load TMP without
         -- an extra memory read cycle.  Two sequential states load low then high byte.
         ESS_TMP_FROM_OP1, -- Load TMP[7:0]  from r_exec_op1 (low byte of 16-bit address)
-        ESS_TMP_FROM_OP2  -- Load TMP[15:8] from r_exec_op2 (high byte); then → next ESS
+        ESS_TMP_FROM_OP2, -- Load TMP[15:8] from r_exec_op2 (high byte); then → next ESS
+
+        -- Link Register: BSR / CALL LR / RET LR  (v0.11)
+        ESS_BSR_1,        -- BSR rel8 ciclo 1/4: SP -= 2; LR <- PC (dirección de retorno)
+        ESS_BSR_2,        -- BSR rel8 ciclo 2/4: M[SP]   <- PC_L
+        ESS_BSR_3,        -- BSR rel8 ciclo 3/4: M[SP+1] <- PC_H
+        ESS_BSR_4,        -- BSR rel8 ciclo 4/4: PC <- PC + rel8 (offset en DataIn desde DECODE)
+        ESS_CALL_LR,      -- CALL LR,nn: LR <- PC (ret addr); PC <- TMP (destino) — 1 ciclo
+        ESS_RET_LR        -- RET LR:     PC <- LR  (retorno sin memoria) — 1 ciclo
     );
 
     -- =========================================================================
