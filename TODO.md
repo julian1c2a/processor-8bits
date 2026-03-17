@@ -118,6 +118,18 @@ Este archivo lista el estado de implementación de la ISA v0.8 en la Unidad de C
   - [x] `Fwd_A_Data` ya estaba conectado a `s_DataPath_RegA = RegA` (valor correcto tras el flanco de reloj); el mux `ALU_OpA = Fwd_A_Data if Fwd_A_En='1' else RegA` opera con el valor actualizado en ambos casos → transparente para los tests existentes.
   - [x] TB-01..13 ALL PASS (timestamps idénticos a v0.9).
 
+- [x] **Suite de tests Python (sim/tests/) — 323 tests, ALL PASS**
+  - [x] `sim/tests/__init__.py` — marcador de paquete.
+  - [x] `sim/tests/test_cpu_alu.py` — 12 clases, tests unitarios de cada operación ALU via `CPU.step()`.
+  - [x] `sim/tests/test_assembler.py` — tests de `assemble_line()` y ciclo `feed()`/`link()` para toda la ISA.
+  - [x] `sim/tests/test_programs.py` — porta los 13 programas de `Processor_Top_tb.vhdl` al simulador Python; verifica las mismas condiciones PASS que el VHDL.
+  - [x] 1 expected failure documentado: `OUT #n, A` (bug conocido en el parser del ensamblador).
+
+- [x] **Bugs corregidos en el simulador Python**
+  - [x] `sim/alu.py` — `ref_ROL`/`ref_ROR`: rotación circular → rotación a través de carry (C flag correcto).
+  - [x] `sim/cpu.py` — ROL/ROR: pasan `get_C()` como `cin` a la ALU.
+  - [x] `sim/cpu.py` — `_handle_interrupt`: lee el vector de interrupción **antes** del `push16`, evitando sobreescribir el vector NMI (0xFFFA) cuando SP=0xFFFE.
+
 ---
 
 ## Pendiente — Optimizaciones Avanzadas (v0.11+)

@@ -146,6 +146,8 @@ class CPU:
 
     def _handle_interrupt(self, vector_addr: int, mem_diff: list):
         """Push PC y F. Carga PC desde vector. Retorna registros modificados."""
+        # Leer el vector ANTES del push: SP decrece hacia las direcciones altas del vector
+        new_pc = self.mem_read16(vector_addr)
         sp_pre_pc = (self.SP - 2) & 0xFFFF
         mem_diff.append((sp_pre_pc,       self.mem[sp_pre_pc],            self.PC & 0xFF))
         mem_diff.append(((sp_pre_pc+1) & 0xFFFF, self.mem[(sp_pre_pc+1)&0xFFFF], (self.PC>>8) & 0xFF))
@@ -154,7 +156,7 @@ class CPU:
         mem_diff.append((sp_pre_f,        self.mem[sp_pre_f],             self.F))
         mem_diff.append(((sp_pre_f+1) & 0xFFFF, self.mem[(sp_pre_f+1)&0xFFFF],  0x00))
         self.push16(self.F)
-        self.PC = self.mem_read16(vector_addr)
+        self.PC = new_pc
         self.I  = False
 
     # ------------------------------------------------------------------
@@ -619,9 +621,9 @@ class CPU:
         elif opcode == 0xCB:
             mnemonic='ASR A'; alu_op(ref_ASR,self.A,0); cycles=2
         elif opcode == 0xCC:
-            mnemonic='ROL A'; alu_op(ref_ROL,self.A,0); cycles=2
+            mnemonic='ROL A'; alu_op(ref_ROL,self.A,0,self.get_C()); cycles=2
         elif opcode == 0xCD:
-            mnemonic='ROR A'; alu_op(ref_ROR,self.A,0); cycles=2
+            mnemonic='ROR A'; alu_op(ref_ROR,self.A,0,self.get_C()); cycles=2
         elif opcode == 0xCE:
             mnemonic='SWAP A'; alu_op(ref_SWP,self.A,0); cycles=2
 

@@ -110,15 +110,17 @@ def ref_LSR(a, b, cin):
 
 
 def ref_ROL(a, b, cin):
-    acc = u8((a << 1) | bit(a, 7))
+    C = bit(a, 7)               # outgoing bit → C flag
+    acc = u8((a << 1) | cin)    # rotate left through carry
     G, E = common_GE(a, b)
-    return acc, pack_status(Z=common_Z(acc), G=G, E=E)
+    return acc, pack_status(C=C, Z=common_Z(acc), G=G, E=E)
 
 
 def ref_ROR(a, b, cin):
-    acc = u8((bit(a, 0) << 7) | (a >> 1))
+    C = bit(a, 0)                    # outgoing bit → C flag
+    acc = u8((cin << 7) | (a >> 1)) # rotate right through carry
     G, E = common_GE(a, b)
-    return acc, pack_status(Z=common_Z(acc), G=G, E=E)
+    return acc, pack_status(C=C, Z=common_Z(acc), G=G, E=E)
 
 
 def ref_INC(a, b, cin):
