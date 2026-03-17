@@ -885,17 +885,12 @@ begin
                                             is_single=>'0', is_multi=>'1');
                                         r_IF_ID <= NOP_IF_ID;
 
-                                    -- BSR rel8 (0xF0): 2-byte; offset implícito en DataIn
-                                    -- (el FETCH del ciclo DECODE lee el offset byte; los ciclos de
-                                    --  WRITE de ESS_BSR no actualizan el BRAM output register,
-                                    --  por lo que DataIn conserva el offset hasta ESS_BSR_4)
+                                    -- BSR rel8 (0xF0): 2-byte; offset fetched via DSS_OP1.
+                                    -- PC tras DSS_OP1 = opcode_addr+2 = ret_addr; capturado en LR
+                                    -- en ESS_BSR_1.  ESS_BSR_4 usa Op_Sel='1'/Op_Data=r_exec_op1.
                                     when x"F0" =>
-                                        r_ID_EX <= (valid=>'1', opcode=>x"F0",
-                                            op1=>x"00", op2=>x"00", ctrl=>INIT_CTRL_BUS,
-                                            writes_a=>'0', writes_b=>'0',
-                                            reads_a=>'0', reads_b=>'0',
-                                            is_single=>'0', is_multi=>'1');
-                                        r_IF_ID <= NOP_IF_ID;
+                                        dss <= DSS_OP1;
+                                        -- Hold r_IF_ID (keep opcode=0xF0), operand arrives next
 
                                     when others =>
                                         -- Unknown: NOP
@@ -956,8 +951,9 @@ begin
                                         dss <= DSS_OPCODE;
 
                                     -- 2-byte mem ops: op1 is address or port (multi-cycle)
+                                    -- x"F0" = BSR rel8: op1 = rel8 offset byte
                                     when x"12"|x"22"|x"30"|x"40"|x"16"|x"34"|
-                                         x"D0"|x"D2"|x"E0"|x"E2" =>
+                                         x"D0"|x"D2"|x"E0"|x"E2"|x"F0" =>
                                         r_ID_EX <= (valid=>'1', opcode=>r_IF_ID.opcode,
                                             op1=>InstrIn, op2=>x"00", ctrl=>INIT_CTRL_BUS,
                                             writes_a=>writes_a_f(r_IF_ID.opcode),
@@ -1651,9 +1647,12 @@ begin
                     v_needs_mem := true;
 
                 when ESS_BSR_4 =>
-                    -- Ciclo 4/4: PC ← PC + rel8.
-                    -- El byte de offset sigue disponible en DataIn (los ciclos de
-                    -- escritura ESS_BSR_2/3 no actualizan el BRAM output register).
+                    -- Ciclo 4/4: PC ← PC + sign_ext(rel8).
+                    -- PC aquí = opcode_addr+2 (ret_addr, tras DSS_OP1).
+                    -- Op_Sel='1' enruta r_exec_op1 (offset byte) como DataIn
+                    -- del AddressPath, donde EA_B_SRC_DATA_IN lo extiende con signo.
+                    v_ctrl.Op_Data      := r_exec_op1;
+                    v_ctrl.Op_Sel       := '1';
                     v_ctrl.EA_A_Sel     := EA_A_SRC_PC;
                     v_ctrl.EA_B_Sel     := EA_B_SRC_DATA_IN;
                     v_ctrl.Load_Src_Sel := LOAD_SRC_ALU_RES;

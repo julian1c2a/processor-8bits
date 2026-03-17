@@ -132,10 +132,30 @@ Este archivo lista el estado de implementación de la ISA v0.8 en la Unidad de C
 
 ---
 
-## Pendiente — Optimizaciones Avanzadas (v0.11+)
+## Completado en v0.11
 
-- [ ] **Stall RAW restante: LD A,[n] → ADD**
-  - [ ] Permitir FETCH durante los últimos ciclos de ESS para reducir la latencia post-multi-ciclo.
+- [x] **Link Register (LR) — BSR rel8 / RET LR / CALL LR, nn**
+  - [x] `AddressPath_pkg.vhdl`: `Load_Src_Sel` ampliado de 1 bit a 2 bits; nueva constante `LOAD_SRC_LR`.
+  - [x] `AddressPath.vhdl`: puerto actualizado; mux 3-vías (EA_Adder_Res / TMP / LR) para cargar PC.
+  - [x] `ControlUnit_pkg.vhdl`: campo `Load_Src_Sel` actualizado a `std_logic_vector(1 downto 0)`.
+  - [x] `Pipeline_pkg.vhdl`: 6 nuevos estados ESS: `ESS_BSR_1..4`, `ESS_CALL_LR`, `ESS_RET_LR`.
+  - [x] `ControlUnit.vhdl`:
+    - 7 asignaciones literales `'1'` de `Load_Src_Sel` reemplazadas por `LOAD_SRC_TMP`.
+    - BSR (0xF0): dispatch via `DSS_OP1` (fetch del byte offset en `r_exec_op1`; PC=ret_addr tras DSS_OP1).
+    - ESS_BSR_4: usa `Op_Sel='1'` + `Op_Data=r_exec_op1` para extender con signo el offset via EA_B.
+    - ESS_CALL_LR: `LR←PC`, `PC←TMP` en 1 ciclo (atomic via non-blocking VHDL).
+    - ESS_RET_LR: `PC←LR` en 1 ciclo.
+    - Transiciones de estado y dispatch completos para 0xF0, 0xF1, 0xF2.
+  - [x] Simulador Python — `sim/cpu.py`: BSR, RET LR, CALL LR ya implementados (formulario correcto).
+  - [x] **TB-14 añadido** (`Processor_Top_tb.vhdl` + `sim/tests/test_programs.py`): BSR×2 + CALL LR×1 → INC A en subrutina; resultados [0x0100]=1, [0x0101]=2, [0x0102]=3.
+  - [x] **326 tests Python, ALL PASS** (1 expected failure: `OUT #n,A` bug en el parser del ensamblador).
+
+---
+
+## Pendiente — Optimizaciones Avanzadas (v0.12+)
+
+- [ ] **FETCH solapado con últimos ciclos ESS**
+  - [ ] Reducir burbuja post-multi-ciclo: solapar el FETCH de la siguiente instrucción con el último ciclo de ESS cuando el bus de memoria no está en uso (p.ej. ESS_LD_WB, ESS_BSR_1, ESS_CALL_LR…).
   - [ ] Actualmente: fin de ESS → FETCH (1 ciclo) → DECODE (1 ciclo) → EXEC. Potencial: solapar FETCH con el último ciclo de ESS.
 
 - [ ] **Especulación de Dirección BRAM**
@@ -145,11 +165,6 @@ Este archivo lista el estado de implementación de la ISA v0.8 en la Unidad de C
 - [ ] **BRAM True Dual-Port (TDP)**
   - [ ] Port B exclusivo para la pila (stack) — permite solapar push/pop con fetch.
   - [ ] `CALL nn` baja de 6 a 4 ciclos, `RET` de 3 a 2 ciclos.
-
-- [ ] **Link Register (LR) y `BSR`/`RET LR`**
-  - [ ] LR ya existe en `AddressPath`. Falta cablear `Load_LR` desde la UC pipeline.
-  - [ ] Instrucción `BSR rel8` (opcode `0xF0`): 2 bytes, 4 ciclos.
-  - [ ] Instrucción `RET LR` (opcode `0xF1`): 1 byte, 1 ciclo.
 
 - [ ] **Return Address Stack (RAS)**
   - [ ] Pila hardware de 4 entradas para predicción especulativa de `RET`.

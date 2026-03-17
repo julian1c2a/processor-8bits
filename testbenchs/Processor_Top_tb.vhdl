@@ -5,8 +5,8 @@
 -- Entidad : Processor_Top_tb
 -- Descripción:
 --   Testbench de integración del procesador completo.
---   Un único archivo con 13 programas seleccionables mediante el generic
---   PROGRAM_SEL (entero 1..13).  Cada programa carga una sección de datos
+--   Un único archivo con 14 programas seleccionables mediante el generic
+--   PROGRAM_SEL (entero 1..14).  Cada programa carga una sección de datos
 --   en la RAM y verifica resultados tras la instrucción HALT.
 --
 --   PROGRAM_SEL | Grupo de instrucciones
@@ -24,6 +24,7 @@
 --       11      | ADD16 / SUB16 (#n / #nn)
 --       12      | Interrupciones (IRQ entry + RTI / NMI entry + RTI)
 --       13      | Pipeline hazards (RAW stall / flush por salto tomado)
+--       14      | Link Register: BSR rel8 / RET LR / CALL LR,nn  (v0.11)
 --
 -- Convenciones:
 --   * Código comienza en 0x0000.
@@ -44,7 +45,7 @@ use work.ALU_pkg.ALL;
 
 entity Processor_Top_tb is
     generic (
-        PROGRAM_SEL : integer := 1   -- Selecciona el programa de test (1..13)
+        PROGRAM_SEL : integer := 1   -- Selecciona el programa de test (1..14)
     );
 end entity Processor_Top_tb;
 
@@ -839,6 +840,38 @@ begin
             -- HALT
             RAM(16#0010#) := x"01";
 
+        -- =================================================================
+        -- TB-14  BSR rel8 / RET LR / CALL LR, nn  (v0.11)
+        -- =================================================================
+        -- Subrutina en 0x0050: INC A; RET LR.
+        --
+        -- Programa principal:
+        --   LD A,#0
+        --   BSR +0x4C  → target=0x0050 (PC_ret=0x0004→LR)  A+=1=1
+        --   ST A,[0x0100]   ; esperado 0x01
+        --   BSR +0x47  → target=0x0050 (PC_ret=0x0009→LR)  A+=1=2
+        --   ST A,[0x0101]   ; esperado 0x02
+        --   CALL LR,0x0050  → LR=0x000F; A+=1=3
+        --   ST A,[0x0102]   ; esperado 0x03
+        --   HALT
+        --
+        -- Esperados:
+        --   [0x0100] = 0x01  (BSR call 1: INC A: 0→1)
+        --   [0x0101] = 0x02  (BSR call 2: INC A: 1→2)
+        --   [0x0102] = 0x03  (CALL LR call 3: INC A: 2→3)
+        elsif PROGRAM_SEL = 14 then
+            RAM(16#0000#) := x"11"; RAM(16#0001#) := x"00";  -- LD A,#0
+            RAM(16#0002#) := x"F0"; RAM(16#0003#) := x"4C";  -- BSR +0x4C → 0x0050 (LR=0x0004)
+            RAM(16#0004#) := x"31"; RAM(16#0005#) := x"00"; RAM(16#0006#) := x"01"; -- ST A,[0x0100]
+            RAM(16#0007#) := x"F0"; RAM(16#0008#) := x"47";  -- BSR +0x47 → 0x0050 (LR=0x0009)
+            RAM(16#0009#) := x"31"; RAM(16#000A#) := x"01"; RAM(16#000B#) := x"01"; -- ST A,[0x0101]
+            RAM(16#000C#) := x"F2"; RAM(16#000D#) := x"50"; RAM(16#000E#) := x"00"; -- CALL LR,0x0050
+            RAM(16#000F#) := x"31"; RAM(16#0010#) := x"02"; RAM(16#0011#) := x"01"; -- ST A,[0x0102]
+            RAM(16#0012#) := x"01";                            -- HALT
+            -- Subrutina @ 0x0050: INC A; RET LR
+            RAM(16#0050#) := x"C2";  -- INC A
+            RAM(16#0051#) := x"F1";  -- RET LR
+
         end if;  -- PROGRAM_SEL
 
         -- Esperar un delta cycle para que las asignaciones de RAM se apliquen
@@ -1106,8 +1139,17 @@ begin
                 report "TB-13 FAIL flush salto: esperado 0x42 (INC no ejecutado), obtenido 0x" & to_hstring(RAM(16#0101#)) severity error;
             report "TB-13 PASS: Pipeline hazards verificados.";
 
+        elsif PROGRAM_SEL = 14 then
+            assert RAM(16#0100#) = x"01"
+                report "TB-14 FAIL BSR call 1: esperado 0x01, obtenido 0x" & to_hstring(RAM(16#0100#)) severity error;
+            assert RAM(16#0101#) = x"02"
+                report "TB-14 FAIL BSR call 2: esperado 0x02, obtenido 0x" & to_hstring(RAM(16#0101#)) severity error;
+            assert RAM(16#0102#) = x"03"
+                report "TB-14 FAIL CALL LR call 3: esperado 0x03, obtenido 0x" & to_hstring(RAM(16#0102#)) severity error;
+            report "TB-14 PASS: BSR / RET LR / CALL LR verificados.";
+
         else
-            report "PROGRAM_SEL=" & integer'image(PROGRAM_SEL) & " no reconocido." severity failure;
+            report "PROGRAM_SEL=" & integer'image(PROGRAM_SEL) & " no reconocido (rango válido: 1..14)." severity failure;
         end if;
 
         report "=== FIN SIMULACION PROCESADOR - PROGRAM_SEL=" &

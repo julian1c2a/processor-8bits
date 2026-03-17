@@ -743,5 +743,47 @@ class TestTB13_Hazards(unittest.TestCase):
     def test_flush_no_inc(self): self.assertEqual(self.cpu.mem[0x0101], 0x42)
 
 
+# TB-14  BSR rel8 / RET LR / CALL LR, nn  (v0.11)
+# ---------------------------------------------------------------------------
+
+class TestTB14_LinkRegister(unittest.TestCase):
+    """
+    Verifica BSR rel8, RET LR y CALL LR, nn.
+    Subrutina en 0x0050: INC A; RET LR.
+    Espera:
+      [0x0100] = 0x01  (BSR call 1: 0→1)
+      [0x0101] = 0x02  (BSR call 2: 1→2)
+      [0x0102] = 0x03  (CALL LR call 3: 2→3)
+    """
+
+    def setUp(self):
+        m = {}
+        # LD A,#0
+        m[0x0000]=0x11; m[0x0001]=0x00
+        # BSR +0x4C → target = (0x0002+2) + 0x4C = 0x0004 + 0x4C = 0x0050  (LR=0x0004)
+        m[0x0002]=0xF0; m[0x0003]=0x4C
+        # ST A,[0x0100]
+        m[0x0004]=0x31; m[0x0005]=0x00; m[0x0006]=0x01
+        # BSR +0x47 → target = (0x0007+2) + 0x47 = 0x0009 + 0x47 = 0x0050  (LR=0x0009)
+        m[0x0007]=0xF0; m[0x0008]=0x47
+        # ST A,[0x0101]
+        m[0x0009]=0x31; m[0x000A]=0x01; m[0x000B]=0x01
+        # CALL LR, 0x0050  (LR=0x000F, PC→0x0050)
+        m[0x000C]=0xF2; m[0x000D]=0x50; m[0x000E]=0x00
+        # ST A,[0x0102]
+        m[0x000F]=0x31; m[0x0010]=0x02; m[0x0011]=0x01
+        # HALT
+        m[0x0012]=0x01
+        # Subrutina @ 0x0050: INC A; RET LR
+        m[0x0050]=0xC2  # INC A
+        m[0x0051]=0xF1  # RET LR
+        self.cpu = make_cpu(m)
+        run_to_halt(self.cpu)
+
+    def test_bsr_call1(self):    self.assertEqual(self.cpu.mem[0x0100], 0x01)
+    def test_bsr_call2(self):    self.assertEqual(self.cpu.mem[0x0101], 0x02)
+    def test_call_lr_call3(self): self.assertEqual(self.cpu.mem[0x0102], 0x03)
+
+
 if __name__ == '__main__':
     unittest.main()
